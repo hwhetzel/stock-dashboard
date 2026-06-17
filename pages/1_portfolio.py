@@ -125,7 +125,7 @@ else:
     st.divider()
 
     # Style G/L columns
-    styled = holdings.style.applymap(
+    styled = holdings.style.map(
         color_value, subset=["Unrealized G/L", "Unrealized G/L %", "Realized G/L"]
     ).format({
         "Shares":           "{:.4f}",
@@ -238,7 +238,7 @@ else:
 
         if save_btn:
             update_transaction(
-                tx_id, e_ticker.upper().strip(), e_type,
+                tx_id, (e_ticker or "").upper().strip(), e_type,
                 e_shares, e_price, e_date.strftime("%Y-%m-%d"), e_notes
             )
             st.success("Transaction updated.")
