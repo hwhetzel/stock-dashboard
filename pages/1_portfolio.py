@@ -169,7 +169,7 @@ with st.form("add_tx_form", clear_on_submit=True):
 
     ticker_input = col1.text_input("Ticker", placeholder="e.g. AAPL").upper().strip()
     tx_type      = col2.selectbox("Type", ["buy", "sell"])
-    shares_input = col3.number_input("Shares", min_value=0.0001, step=0.01, format="%.4f")
+    shares_input = col3.number_input("Shares", min_value=0.001, step=0.01, format="%.4f")
     price_input  = col4.number_input("Price per Share", min_value=0.01, step=0.01, format="%.2f")
     date_input   = col5.date_input("Date", value=date.today())
     notes_input  = st.text_input("Notes (optional)", placeholder="e.g. dividend reinvestment")

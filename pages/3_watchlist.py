@@ -161,17 +161,20 @@ else:
                                                 value=float(current) if current else 1.0, key=f"mv_price_{ticker}")
                     mv_date   = st.date_input("Date", value=date.today(), key=f"mv_date_{ticker}")
                     if st.form_submit_button("Add as Buy"):
-                        add_transaction(
-                            ticker=ticker,
-                            type_="buy",
-                            shares=mv_shares,
-                            price=mv_price,
-                            date=mv_date.strftime("%Y-%m-%d"),
-                            notes="Added from watchlist",
-                        )
-                        remove_from_watchlist(ticker)
-                        st.success(f"{ticker} moved to portfolio.")
-                        st.rerun()
+                        if mv_shares <= 0.0001:
+                            st.error("Enter a share amount greater than 0.0001.")
+                        else:
+                            add_transaction(
+                                ticker=ticker,
+                                type_="buy",
+                                shares=mv_shares,
+                                price=mv_price,
+                                date=mv_date.strftime("%Y-%m-%d"),
+                                notes="Added from watchlist",
+                            )
+                            remove_from_watchlist(ticker)
+                            st.success(f"{ticker} moved to portfolio.")
+                            st.rerun()
 
                 st.divider()
 

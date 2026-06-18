@@ -213,7 +213,7 @@ def is_valid_ticker(ticker: str) -> bool:
     Used to validate user input before saving to the database.
     """
     try:
-        info = yf.Ticker(ticker).fast_info
-        return info.get("last_price") is not None
+        hist = yf.Ticker(ticker).history(period="2d")
+        return not hist.empty
     except Exception:
         return False
