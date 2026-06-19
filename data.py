@@ -172,11 +172,22 @@ def get_earnings_history(ticker: str) -> pd.DataFrame:
 def get_news(ticker: str, limit: int = 10) -> list[dict]:
     """
     Return recent news articles for a ticker.
-    Each dict has keys: title, publisher, link, providerPublishTime
+    Normalises the yfinance response into consistent keys:
+    title, publisher, link
     """
     try:
-        articles = yf.Ticker(ticker).news or []
-        return articles[:limit]
+        raw = yf.Ticker(ticker).news or []
+        articles = []
+        for item in raw[:limit]:
+            content  = item.get("content", {})
+            provider = content.get("provider", {})
+            url      = content.get("canonicalUrl", {}) or content.get("clickThroughUrl", {})
+            articles.append({
+                "title":     content.get("title", "No title"),
+                "publisher": provider.get("displayName", ""),
+                "link":      url.get("url", "#"),
+            })
+        return articles
     except Exception:
         return []
 
