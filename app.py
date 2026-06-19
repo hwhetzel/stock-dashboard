@@ -105,9 +105,9 @@ else:
         col = cols[i % 4]
         with col:
             st.markdown(f"**{ticker}**")
-            if price:
+            if price is not None:
                 st.markdown(f"${price:,.2f}")
-            if unreal is not None:
+            if unreal is not None and unreal_p is not None:
                 color = "green" if unreal >= 0 else "red"
                 sign  = "+" if unreal >= 0 else ""
                 st.markdown(
