@@ -14,13 +14,22 @@ APP     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py")
 
 def start_streamlit():
     """Launch Streamlit as a subprocess, suppressing its console output."""
+    kwargs = {}
+    if sys.platform == "win32":
+        # Prevent Windows from opening a console window for the subprocess
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        kwargs["startupinfo"] = si
+
     subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run", APP,
          "--server.port", str(PORT),
-         "--server.headless", "true",       # don't open a browser tab
+         "--server.headless", "true",
          "--browser.gatherUsageStats", "false"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        **kwargs,
     )
 
 
@@ -61,6 +70,8 @@ def main():
         resizable=True,
     )
     webview.start()
+    
+    sys.exit(0)
 
 
 if __name__ == "__main__":
