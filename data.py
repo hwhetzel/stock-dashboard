@@ -1,7 +1,8 @@
+from curses import raw
 import yfinance as yf
 import pandas as pd
 import streamlit as st
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 
 # ── Caching strategy ──────────────────────────────────────────────────────────
@@ -182,10 +183,28 @@ def get_news(ticker: str, limit: int = 10) -> list[dict]:
             content  = item.get("content", {})
             provider = content.get("provider", {})
             url      = content.get("canonicalUrl", {}) or content.get("clickThroughUrl", {})
+            pub_date = content.get("pubDate", "")
+
+            # Parse ISO timestamp to readable format
+            try:
+                # Parse UTC timestamp
+                dt = datetime.strptime(pub_date, "%Y-%m-%dT%H:%M:%SZ")
+
+                # Make it timezone-aware (UTC)
+                dt = dt.replace(tzinfo=timezone.utc)
+
+                # Convert to local computer timezone
+                local_dt = dt.astimezone()
+
+                pub_date_str = local_dt.strftime("%b %d, %Y %I:%M %p %Z")
+            except Exception:
+                pub_date_str = ""
+
             articles.append({
                 "title":     content.get("title", "No title"),
                 "publisher": provider.get("displayName", ""),
                 "link":      url.get("url", "#"),
+                "published": pub_date_str,
             })
         return articles
     except Exception:
