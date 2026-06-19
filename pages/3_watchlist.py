@@ -9,8 +9,6 @@ from utils.indicators import compute_rsi, compute_macd, compute_moving_averages
 
 st.set_page_config(page_title="Watchlist", layout="wide")
 initialize_db()
-import traceback
-st.set_option('client.showErrorDetails', True)
 
 st.title("Watchlist")
 
