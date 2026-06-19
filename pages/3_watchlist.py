@@ -9,6 +9,8 @@ from utils.indicators import compute_rsi, compute_macd, compute_moving_averages
 
 st.set_page_config(page_title="Watchlist", layout="wide")
 initialize_db()
+import traceback
+st.set_option('client.showErrorDetails', True)
 
 st.title("Watchlist")
 
@@ -138,69 +140,69 @@ else:
                 if item["notes"]:
                     st.caption(f"Notes: {item['notes']}")
 
-                # Technical signals
+                # Technical signals — only load when expander is open
                 st.markdown("**Technical Signals**")
-                with st.spinner("Analysing signals..."):
-                    signals = get_signals(ticker)
+                load_signals = st.button("Load Signals", key=f"load_{ticker}")
+                if load_signals:
+                    with st.spinner("Analysing signals..."):
+                        signals = get_signals(ticker)
 
-                if not signals:
-                    st.caption("No signals available.")
-                else:
-                    for sig in signals:
-                        icon = FLAG_COLORS.get(sig["flag"], "⚪")
-                        st.markdown(f"{icon} **{sig['label']}** — {sig['reason']}")
+                if load_signals:
+                    if not signals:
+                        st.caption("No signals available.")
+                    else:
+                        for sig in signals:
+                            icon = FLAG_COLORS.get(sig["flag"], "⚪")
+                            st.markdown(f"{icon} **{sig['label']}** — {sig['reason']}")
 
             with col2:
                 st.markdown("**Actions**")
 
                 # Move to portfolio
-                with st.form(f"move_{ticker}"):
-                    st.caption("Move to Portfolio")
-                    mv_shares = st.number_input("Shares", min_value=0.0001, step=0.01, format="%.4f", key=f"mv_shares_{ticker}")
-                    mv_price  = st.number_input("Price",  min_value=0.01,   step=0.01, format="%.2f",
-                                                value=float(current) if current else 1.0, key=f"mv_price_{ticker}")
-                    mv_date   = st.date_input("Date", value=date.today(), key=f"mv_date_{ticker}")
-                    if st.form_submit_button("Add as Buy"):
-                        if mv_shares <= 0.0001:
-                            st.error("Enter a share amount greater than 0.0001.")
-                        else:
-                            add_transaction(
-                                ticker=ticker,
-                                type_="buy",
-                                shares=mv_shares,
-                                price=mv_price,
-                                date=mv_date.strftime("%Y-%m-%d"),
-                                notes="Added from watchlist",
-                            )
-                            remove_from_watchlist(ticker)
-                            st.success(f"{ticker} moved to portfolio.")
-                            st.rerun()
+                st.caption("Move to Portfolio")
+                mv_shares = st.number_input("Shares", min_value=0.001, step=0.01, format="%.4f", key=f"mv_shares_{ticker}")
+                mv_price  = st.number_input("Price",  min_value=0.01,  step=0.01, format="%.2f",
+                                            value=float(current) if current else 1.0, key=f"mv_price_{ticker}")
+                mv_date   = st.date_input("Date", value=date.today(), key=f"mv_date_{ticker}")
+                if st.button("Add as Buy", key=f"buy_{ticker}"):
+                    if mv_shares <= 0.001:
+                        st.error("Enter a share amount greater than 0.001.")
+                    else:
+                        add_transaction(
+                            ticker=ticker,
+                            type_="buy",
+                            shares=mv_shares,
+                            price=mv_price,
+                            date=mv_date.strftime("%Y-%m-%d"),
+                            notes="Added from watchlist",
+                        )
+                        remove_from_watchlist(ticker)
+                        st.success(f"{ticker} moved to portfolio.")
+                        st.rerun()
 
                 st.divider()
 
                 # Edit target / notes
-                with st.form(f"edit_{ticker}"):
-                    st.caption("Edit")
-                    new_target = st.number_input(
-                        "Target Price",
-                        min_value=0.0,
-                        value=float(target_price) if target_price else 0.0,
-                        step=0.01, format="%.2f",
-                        key=f"target_{ticker}",
-                    )
-                    new_notes = st.text_input("Notes", value=item["notes"] or "", key=f"notes_{ticker}")
-                    if st.form_submit_button("Save"):
-                        update_watchlist_item(ticker, new_target or None, new_notes)
-                        st.success("Updated.")
-                        st.rerun()
+                st.caption("Edit")
+                new_target = st.number_input(
+                    "Target Price",
+                    min_value=0.0,
+                    value=float(target_price) if target_price else 0.0,
+                    step=0.01, format="%.2f",
+                    key=f"target_{ticker}",
+                )
+                new_notes = st.text_input("Notes", value=item["notes"] or "", key=f"notes_{ticker}")
+                if st.button("Save", key=f"save_{ticker}"):
+                    update_watchlist_item(ticker, new_target or None, new_notes)
+                    st.success("Updated.")
+                    st.rerun()
 
                 st.divider()
 
                 # Remove
-                with st.form(f"remove_{ticker}"):
-                    if st.form_submit_button("🗑 Remove", type="primary"):
-                        remove_from_watchlist(ticker)
-                        st.rerun()
+                if st.button("🗑 Remove", key=f"remove_{ticker}", type="primary"):
+                    remove_from_watchlist(ticker)
+                    st.rerun()
 
 st.divider()
 
