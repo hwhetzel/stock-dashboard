@@ -12,17 +12,19 @@ URL     = f"http://localhost:{PORT}"
 APP     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py")
 
 
+streamlit_process = None
+
 def start_streamlit():
     """Launch Streamlit as a subprocess, suppressing its console output."""
+    global streamlit_process
     kwargs = {}
     if sys.platform == "win32":
-        # Prevent Windows from opening a console window for the subprocess
         si = subprocess.STARTUPINFO()
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         si.wShowWindow = subprocess.SW_HIDE
         kwargs["startupinfo"] = si
 
-    subprocess.Popen(
+    streamlit_process = subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run", APP,
          "--server.port", str(PORT),
          "--server.headless", "true",
@@ -70,9 +72,16 @@ def main():
         resizable=True,
     )
     webview.start()
-    
-    sys.exit(0)
 
+    # Webview window closed — kill Streamlit subprocess before exiting
+    if streamlit_process is not None:
+        streamlit_process.terminate()
+        try:
+            streamlit_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            streamlit_process.kill()
+
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()
