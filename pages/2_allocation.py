@@ -98,7 +98,7 @@ with col1:
         title="By Ticker",
     )
     fig_ticker.update_traces(textposition="inside", textinfo="percent+label")
-    fig_ticker.update_layout(showlegend=False, margin=dict(t=40, b=0, l=0, r=0))
+    fig_ticker.update_layout(showlegend=False, margin=dict(t=40, b=0, l=0, r=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig_ticker, use_container_width=True)
 
 with col2:
@@ -133,7 +133,7 @@ with col3:
         title="By Sector",
     )
     fig_sector.update_traces(textposition="inside", textinfo="percent+label")
-    fig_sector.update_layout(showlegend=False, margin=dict(t=40, b=0, l=0, r=0))
+    fig_sector.update_layout(showlegend=False, margin=dict(t=40, b=0, l=0, r=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig_sector, use_container_width=True)
 
 with col4:
@@ -174,7 +174,11 @@ else:
             title="Return Correlation (1Y Daily)",
             aspect="auto",
         )
-        fig_corr.update_layout(margin=dict(t=40, b=0, l=0, r=0))
+        fig_corr.update_layout(
+            margin=dict(t=40, b=0, l=0, r=0),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+)
         st.plotly_chart(fig_corr, use_container_width=True)
     else:
         st.info("Not enough price history to compute correlations.")

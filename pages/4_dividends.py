@@ -205,5 +205,8 @@ else:
         title=f"Dividend Income by {period_choice}",
         labels={"Amount": "Income ($)"},
     )
-    fig.update_layout(margin=dict(t=40, b=0, l=0, r=0))
+    fig.update_layout(margin=dict(
+        t=40, b=0, l=0, r=0), 
+        paper_bgcolor="rgba(0,0,0,0)", 
+        plot_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig, use_container_width=True)

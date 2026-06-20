@@ -30,13 +30,7 @@ def s(key, default):
 # ── Appearance ────────────────────────────────────────────────────────────────
 
 st.subheader("Appearance")
-
-theme = s("theme", "Dark")
-new_theme = st.radio("Theme", ["Light", "Dark"], index=1 if theme == "Dark" else 0, horizontal=True)
-if new_theme != theme:
-    set_setting("theme", new_theme)
-    st.rerun()
-
+st.caption("Light/dark mode uses Streamlit's default theme. Coming soon.")
 st.divider()
 
 # ── Notification thresholds ───────────────────────────────────────────────────

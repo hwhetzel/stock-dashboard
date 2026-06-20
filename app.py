@@ -1,8 +1,9 @@
 import streamlit as st
 from datetime import datetime, timedelta
 import yfinance as yf
-from database import initialize_db, get_transactions, get_watchlist, get_setting
-from data import get_bulk_current_prices, get_news
+import pandas as pd
+from database import initialize_db, get_transactions, get_setting
+from data import get_bulk_current_prices, get_news, get_earnings_dates
 from utils.theme import apply_theme
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -58,7 +59,6 @@ prices = get_bulk_current_prices(tickers)
 # ── Day change data ───────────────────────────────────────────────────────────
 
 def get_day_change(ticker: str) -> dict:
-    """Return current price, previous close, day change $ and % for a ticker."""
     try:
         info = yf.Ticker(ticker).fast_info
         current = info.get("last_price")
@@ -78,7 +78,7 @@ def get_day_change(ticker: str) -> dict:
 
 day_data = {h["ticker"]: get_day_change(h["ticker"]) for h in holdings}
 
-# ── Compute portfolio totals ──────────────────────────────────────────────────
+# ── Portfolio totals ──────────────────────────────────────────────────────────
 
 total_value = 0.0
 total_cost = 0.0
@@ -98,10 +98,9 @@ total_unrealized = total_value - total_cost
 total_unrealized_pct = (total_unrealized / total_cost * 100) if total_cost else 0
 total_day_change_pct = (total_day_change / (total_value - total_day_change) * 100) if (total_value - total_day_change) else 0
 
-# ── 6 summary cards in 3x2 grid ──────────────────────────────────────────────
+# ── Portfolio summary ─────────────────────────────────────────────────────────
 
 st.subheader("Portfolio Summary")
-
 row1_c1, row1_c2, row1_c3 = st.columns(3)
 row1_c1.metric("Portfolio Value", f"${total_value:,.2f}")
 row1_c2.metric("Total Cost Basis", f"${total_cost:,.2f}")
@@ -126,13 +125,12 @@ row2_c3.metric(
 
 st.divider()
 
-# ── Holdings snapshot table + news side by side ───────────────────────────────
+# ── Holdings snapshot + news ──────────────────────────────────────────────────
 
 snap_col, news_col = st.columns([3, 2])
 
 with snap_col:
     st.subheader("Holdings Snapshot")
-
     snap_rows = []
     for h in holdings:
         ticker = h["ticker"]
@@ -141,7 +139,6 @@ with snap_col:
         unreal = (mkt_val - h["cost_basis"]) if mkt_val else None
         unreal_pct = (unreal / h["cost_basis"] * 100) if unreal and h["cost_basis"] else None
         d = day_data.get(ticker, {})
-
         snap_rows.append({
             "Ticker": ticker,
             "Price": f"${price:,.2f}" if price else "N/A",
@@ -149,132 +146,122 @@ with snap_col:
             "Day %": f"{d['change_pct']:+.2f}%" if d.get("change_pct") is not None else "N/A",
             "Total G/L %": f"{unreal_pct:+.2f}%" if unreal_pct is not None else "N/A",
         })
-
-    snap_df = st.dataframe(
-        snap_rows,
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.dataframe(snap_rows, use_container_width=True, hide_index=True)
 
 with news_col:
-    st.subheader("Latest News")
+    with st.container(border=True):
+        st.subheader("Latest News")
+        news_items = []
+        for ticker in tickers:
+            articles = get_news(ticker, limit=2)
+            for a in articles:
+                news_items.append({
+                    "ticker": ticker,
+                    "title": a.get("title", "No title"),
+                    "publisher": a.get("publisher", ""),
+                    "link": a.get("link", "#"),
+                    "published": a.get("published", ""),
+                })
 
-    # Collect up to 1 article per ticker, show 4 most recent total
-    news_items = []
-    for ticker in tickers:
-        articles = get_news(ticker, limit=2)
-        for a in articles:
-            news_items.append({
-                "ticker": ticker,
-                "title": a.get("title", "No title"),
-                "publisher": a.get("publisher", ""),
-                "link": a.get("link", "#"),
-                "published": a.get("published", ""),
-            })
+        shown = news_items[:4]
+        if not shown:
+            st.caption("No news available.")
+        else:
+            html_lines = []
+            for item in shown:
+                ticker = item["ticker"]
+                d = day_data.get(ticker, {})
+                change = d.get("change_pct")
+                if change is not None and change > 0:
+                    badge_color = "#1a7a1a"
+                elif change is not None and change < 0:
+                    badge_color = "#a00000"
+                else:
+                    badge_color = "#1a5276"
 
-    # Show 4 most recent
-    shown = news_items[:4]
+                badge = (
+                    f"<span style='background-color:{badge_color};color:white;"
+                    f"padding:2px 6px;border-radius:4px;font-size:0.7rem;"
+                    f"font-weight:bold;margin-right:6px;'>{ticker}</span>"
+                )
+                pub = (
+                    f"<br><span style='color:gray;font-size:0.75rem;'>"
+                    f"{item['publisher']} · {item['published']}</span>"
+                ) if item["published"] else ""
 
-    if not shown:
-        st.caption("No news available.")
-    else:
-        html_lines = []
-        for item in shown:
-            ticker = item["ticker"]
-
-            # Badge color based on day change
-            d = day_data.get(ticker, {})
-            change = d.get("change_pct")
-            if change is not None and change > 0:
-                badge_color = "#1a7a1a"
-            elif change is not None and change < 0:
-                badge_color = "#a00000"
-            else:
-                badge_color = "#1a5276"
-
-            badge = (
-                f"<span style='background-color:{badge_color};color:white;"
-                f"padding:2px 6px;border-radius:4px;font-size:0.7rem;"
-                f"font-weight:bold;margin-right:6px;'>{ticker}</span>"
-            )
-            pub = f"<br><span style='color:gray;font-size:0.75rem;'>{item['publisher']} · {item['published']}</span>" if item["published"] else ""
-
-            html_lines.append(
-                f"<div style='padding:6px 0;border-bottom:1px solid #2d3139;'>"
-                f"{badge}"
-                f"<a href='{item['link']}' target='_blank' style='text-decoration:none;font-size:0.88rem;'>"
-                f"{item['title']}</a>"
-                f"{pub}"
-                f"</div>"
-            )
-
-        st.markdown("".join(html_lines), unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.page_link("pages/9_news.py", label="View all news →")
+                html_lines.append(
+                    f"<div style='padding:6px 0;border-bottom:1px solid #2d3139;'>"
+                    f"{badge}"
+                    f"<a href='{item['link']}' target='_blank' "
+                    f"style='text-decoration:none;font-size:0.88rem;'>"
+                    f"{item['title']}</a>{pub}</div>"
+                )
+            st.markdown("".join(html_lines), unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.page_link("pages/9_news.py", label="View all news →")
 
 st.divider()
 
 # ── Since you were gone ───────────────────────────────────────────────────────
 
-st.subheader("Since You Were Gone")
-st.caption("What changed since your last session.")
+with st.container(border=True):
+    st.subheader("Since You Were Gone")
+    st.caption("What changed since your last session.")
 
-# Holdings that moved significantly today
-significant_threshold = float(str(get_setting("notify_price_change_pct", "2.0")))
-moved = []
-for h in holdings:
-    d = day_data.get(h["ticker"], {})
-    if d.get("change_pct") is not None and abs(d["change_pct"]) >= significant_threshold:
-        moved.append((h["ticker"], d["change_pct"], d["current"]))
+    significant_threshold = float(str(get_setting("notify_price_change_pct", "2.0")))
+    moved = []
+    for h in holdings:
+        d = day_data.get(h["ticker"], {})
+        if d.get("change_pct") is not None and abs(d["change_pct"]) >= significant_threshold:
+            moved.append((h["ticker"], d["change_pct"], d["current"]))
 
-if moved:
-    st.markdown("**📊 Holdings with significant moves today:**")
-    for ticker, pct, price in moved:
-        sign = "+" if pct >= 0 else ""
-        color = "green" if pct >= 0 else "red"
-        st.markdown(
-            f"<span style='color:{color}'>**{ticker}** ${price} ({sign}{pct:.2f}%)</span>",
-            unsafe_allow_html=True,
-        )
-else:
-    st.caption("No significant holdings movement today.")
+    if moved:
+        st.markdown("**📊 Holdings with significant moves today:**")
+        for ticker, pct, price in moved:
+            sign = "+" if pct >= 0 else ""
+            color = "green" if pct >= 0 else "red"
+            st.markdown(
+                f"<span style='color:{color}'>**{ticker}** "
+                f"${price} ({sign}{pct:.2f}%)</span>",
+                unsafe_allow_html=True,
+            )
+    else:
+        st.caption("No significant holdings movement today.")
 
-# Upcoming earnings in next 7 days
-from data import get_earnings_dates
-import pandas as pd
-now = datetime.now()
-week_end = now + timedelta(days=7)
-earnings_soon = []
-for ticker in tickers:
-    try:
-        df = get_earnings_dates(ticker, limit=4)
-        if df.empty:
-            continue
-        for dt in df.index:
-            dt_naive = dt.tz_localize(None) if hasattr(dt, "tzinfo") and dt.tzinfo else dt
-            if now <= dt_naive <= week_end:
-                earnings_soon.append((ticker, dt_naive.strftime("%Y-%m-%d")))
-    except Exception:
-        pass
+    now = datetime.now()
+    week_end = now + timedelta(days=7)
+    earnings_soon = []
+    for ticker in tickers:
+        try:
+            df = get_earnings_dates(ticker, limit=4)
+            if df.empty:
+                continue
+            for dt in df.index:
+                dt_naive = dt.tz_localize(None) if hasattr(dt, "tzinfo") and dt.tzinfo else dt
+                if now <= dt_naive <= week_end:
+                    earnings_soon.append((ticker, dt_naive.strftime("%Y-%m-%d")))
+        except Exception:
+            pass
 
-if earnings_soon:
-    st.markdown("**📅 Upcoming earnings (next 7 days):**")
-    for ticker, dt in earnings_soon:
-        st.markdown(f"- **{ticker}** — {dt}")
+    if earnings_soon:
+        st.markdown("**📅 Upcoming earnings (next 7 days):**")
+        for ticker, dt in earnings_soon:
+            st.markdown(f"- **{ticker}** — {dt}")
 
 st.divider()
 
 # ── Quick links ───────────────────────────────────────────────────────────────
 
-st.subheader("Quick Links")
-ql1, ql2, ql3, ql4 = st.columns(4)
-ql1.page_link("pages/1_portfolio.py",  label="Portfolio",  icon="💼")
-ql2.page_link("pages/2_allocation.py", label="Allocation", icon="🥧")
-ql3.page_link("pages/4_dividends.py",  label="Dividends",  icon="💰")
-ql4.page_link("pages/5_analytics.py",  label="Analytics",  icon="📊")
+with st.container(border=True):
+    st.subheader("Quick Links")
+    ql1, ql2, ql3, ql4 = st.columns(4)
+    ql1.page_link("pages/1_portfolio.py",  label="Portfolio",  icon="💼")
+    ql2.page_link("pages/2_allocation.py", label="Allocation", icon="🥧")
+    ql3.page_link("pages/4_dividends.py",  label="Dividends",  icon="💰")
+    ql4.page_link("pages/5_analytics.py",  label="Analytics",  icon="📊")
 
-ql5, ql6, ql7, ql8 = st.columns(4)
-ql5.page_link("pages/3_watchlist.py",  label="Watchlist",  icon="👀")
-ql6.page_link("pages/6_charts.py",     label="Charts",     icon="📉")
-ql7.page_link("pages/7_earnings.py",   label="Earnings",   icon="📅")
-ql8.page_link("pages/8_screener.py",   label="Screener",   icon="🔍")
+    ql5, ql6, ql7, ql8 = st.columns(4)
+    ql5.page_link("pages/3_watchlist.py",  label="Watchlist",  icon="👀")
+    ql6.page_link("pages/6_charts.py",     label="Charts",     icon="📉")
+    ql7.page_link("pages/7_earnings.py",   label="Earnings",   icon="📅")
+    ql8.page_link("pages/8_screener.py",   label="Screener",   icon="🔍")

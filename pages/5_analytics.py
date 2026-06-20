@@ -156,6 +156,8 @@ fig.update_layout(
     xaxis_title="Date",
     hovermode="x unified",
     margin=dict(t=20, b=0, l=0, r=0),
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
 )
 st.plotly_chart(fig, use_container_width=True)
 
@@ -190,5 +192,9 @@ if performance_rows:
         color="Return %", color_continuous_scale="RdYlGn",
         title=f"Return by Holding ({selected_label})",
     )
-    fig_bar.update_layout(margin=dict(t=40, b=0, l=0, r=0), coloraxis_showscale=False)
+    fig_bar.update_layout(margin=dict(
+        t=40, b=0, l=0, r=0), 
+        coloraxis_showscale=False, 
+        paper_bgcolor="rgba(0,0,0,0)", 
+        plot_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig_bar, use_container_width=True)
