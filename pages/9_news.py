@@ -9,6 +9,9 @@ from data import get_news, get_bulk_current_prices
 st.set_page_config(page_title="News", layout="wide")
 initialize_db()
 
+from utils.theme import apply_theme
+apply_theme()
+
 st.title("News")
 
 # ── Build ticker list from holdings + watchlist ───────────────────────────────

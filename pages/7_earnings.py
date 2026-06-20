@@ -9,6 +9,9 @@ from data import get_earnings_dates
 st.set_page_config(page_title="Earnings", layout="wide")
 initialize_db()
 
+from utils.theme import apply_theme
+apply_theme()
+
 st.title("Earnings")
 
 # ── Build ticker list from holdings + watchlist ───────────────────────────────
@@ -31,9 +34,9 @@ def get_held_tickers(transactions):
     return held
 
 
-transactions  = get_transactions()
-held_tickers  = get_held_tickers(transactions)
-watchlist     = get_watchlist()
+transactions = get_transactions()
+held_tickers = get_held_tickers(transactions)
+watchlist = get_watchlist()
 watch_tickers = [w["ticker"] for w in watchlist]
 
 # Combine, deduplicate, held first
@@ -56,10 +59,10 @@ with st.spinner("Loading earnings data..."):
         # yfinance column name for the date index varies — normalise it
         date_col = df.columns[0]
         df = df.rename(columns={
-            date_col:        "Date",
-            "EPS Estimate":  "EPS Estimate",
-            "Reported EPS":  "Reported EPS",
-            "Surprise(%)":   "Surprise %",
+            date_col: "Date",
+            "EPS Estimate": "EPS Estimate",
+            "Reported EPS": "Reported EPS",
+            "Surprise(%)": "Surprise %",
         })
 
         df["Ticker"] = ticker
@@ -79,12 +82,12 @@ now = pd.Timestamp.now()
 
 # Split into upcoming and past
 upcoming_df = earnings_df[earnings_df["Date"] >= now].copy()
-past_df     = earnings_df[earnings_df["Date"] <  now].copy()
+past_df = earnings_df[earnings_df["Date"] <  now].copy()
 
 # ── Earnings this week flag ───────────────────────────────────────────────────
 
-week_end    = now + timedelta(days=7)
-this_week   = upcoming_df[upcoming_df["Date"] <= week_end]
+week_end = now + timedelta(days=7)
+this_week = upcoming_df[upcoming_df["Date"] <= week_end]
 
 if not this_week.empty:
     tickers_this_week = ", ".join(this_week["Ticker"].unique().tolist())

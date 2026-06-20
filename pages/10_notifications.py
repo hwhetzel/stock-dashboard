@@ -22,6 +22,9 @@ from data import get_bulk_current_prices, get_earnings_dates
 st.set_page_config(page_title="Notifications", layout="wide")
 initialize_db()
 
+from utils.theme import apply_theme
+apply_theme()
+
 st.title("Notifications")
 
 # ── Session summary generator ─────────────────────────────────────────────────
@@ -54,6 +57,14 @@ def generate_session_summary() -> dict:
     Checks: holdings movement, watchlist price changes,
     upcoming earnings (next 7 days), upcoming dividends.
     """
+    from database import get_setting
+    price_threshold = float(str(get_setting("notify_price_change_pct", "2.0")))
+    watch_threshold = float(str(get_setting("notify_watchlist_change_pct", "1.0")))
+    earnings_days = int(str(get_setting("notify_earnings_lead_days", "7")))
+    notify_holdings_on = get_setting("notify_holdings", "1") == "1"
+    notify_watchlist_on = get_setting("notify_watchlist", "1") == "1"
+    notify_earnings_on = get_setting("notify_earnings", "1") == "1"
+
     transactions = get_transactions()
     holdings = get_held_tickers(transactions)
     watchlist = get_watchlist()
@@ -75,7 +86,7 @@ def generate_session_summary() -> dict:
             prev = info.get("previous_close")
             if current and prev and prev > 0:
                 change_pct = (current - prev) / prev * 100
-                if abs(change_pct) >= 2.0:
+                if notify_holdings_on and abs(change_pct) >= price_threshold:
                     holdings_movement.append({
                         "ticker": ticker,
                         "change_pct": round(change_pct, 2),
@@ -94,7 +105,7 @@ def generate_session_summary() -> dict:
             prev = info.get("previous_close")
             if current and prev and prev > 0:
                 change_pct = (current - prev) / prev * 100
-                if abs(change_pct) >= 1.0:
+                if notify_watchlist_on and abs(change_pct) >= watch_threshold:
                     watchlist_changes.append({
                         "ticker": ticker,
                         "change_pct": round(change_pct, 2),
@@ -107,7 +118,7 @@ def generate_session_summary() -> dict:
     # ── Upcoming earnings (next 7 days) ───────────────────────────────────────
     upcoming_earnings = []
     now = datetime.now()
-    week_end = now + timedelta(days=7)
+    week_end = now + timedelta(days=earnings_days)
     for ticker in all_tickers:
         try:
             df = get_earnings_dates(ticker, limit=4)
@@ -116,7 +127,7 @@ def generate_session_summary() -> dict:
             df.index = df.index if hasattr(df.index, "tz") else df.index
             for dt in df.index:
                 dt_naive = dt.tz_localize(None) if dt.tzinfo else dt
-                if now <= dt_naive <= week_end:
+                if notify_earnings_on and now <= dt_naive <= week_end:
                     upcoming_earnings.append({
                         "ticker": ticker,
                         "date": dt_naive.strftime("%Y-%m-%d"),

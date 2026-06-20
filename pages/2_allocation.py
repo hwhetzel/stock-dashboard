@@ -11,6 +11,9 @@ from data import get_bulk_current_prices, get_bulk_ticker_info, get_price_histor
 st.set_page_config(page_title="Allocation", layout="wide")
 initialize_db()
 
+from utils.theme import apply_theme
+apply_theme()
+
 st.title("Allocation")
 
 # ── Rebuild holdings from transactions ────────────────────────────────────────
@@ -67,7 +70,8 @@ df["Weight %"] = (df["Market Value"] / total_value * 100).round(2)
 
 # ── Concentration warning ─────────────────────────────────────────────────────
 
-CONCENTRATION_THRESHOLD = 25.0   # warn if any single holding exceeds this %
+from database import get_setting
+CONCENTRATION_THRESHOLD = float(str(get_setting("concentration_pct", "25.0")))
 
 concentrated = df[df["Weight %"] > CONCENTRATION_THRESHOLD]
 if not concentrated.empty:

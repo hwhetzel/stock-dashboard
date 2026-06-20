@@ -10,6 +10,9 @@ from utils.indicators import compute_rsi, compute_macd, compute_moving_averages
 st.set_page_config(page_title="Watchlist", layout="wide")
 initialize_db()
 
+from utils.theme import apply_theme
+apply_theme()
+
 st.title("Watchlist")
 
 # ── Technical signal helpers ──────────────────────────────────────────────────
@@ -20,6 +23,9 @@ def get_signals(ticker: str) -> list[dict]:
     Each dict has: { label, flag, reason }
     flag is one of: "bullish", "bearish", "neutral"
     """
+    from database import get_setting
+    rsi_overbought = int(str(get_setting("notify_rsi_overbought", "70")))
+    rsi_oversold = int(str(get_setting("notify_rsi_oversold", "30")))
     signals = []
     hist = get_price_history(ticker, period="1y", interval="1d")
 
@@ -36,14 +42,14 @@ def get_signals(ticker: str) -> list[dict]:
         if pd.notna(ma50) and pd.notna(ma200):
             if ma50 > ma200:
                 signals.append({
-                    "label":  "MA Crossover",
-                    "flag":   "bullish",
+                    "label": "MA Crossover",
+                    "flag": "bullish",
                     "reason": f"50-day MA (${ma50:.2f}) is above 200-day MA (${ma200:.2f}) — golden cross territory.",
                 })
             else:
                 signals.append({
-                    "label":  "MA Crossover",
-                    "flag":   "bearish",
+                    "label": "MA Crossover",
+                    "flag": "bearish",
                     "reason": f"50-day MA (${ma50:.2f}) is below 200-day MA (${ma200:.2f}) — death cross territory.",
                 })
 
@@ -52,22 +58,22 @@ def get_signals(ticker: str) -> list[dict]:
     if not rsi_series.empty:
         rsi_val = rsi_series.iloc[-1]
         if pd.notna(rsi_val):
-            if rsi_val >= 70:
+            if rsi_val >= rsi_overbought:
                 signals.append({
-                    "label":  "RSI",
-                    "flag":   "bearish",
-                    "reason": f"RSI is {rsi_val:.1f} — overbought (≥70). Potential pullback ahead.",
+                    "label": "RSI",
+                    "flag": "bearish",
+                    "reason": f"RSI is {rsi_val:.1f} — overbought (≥{rsi_overbought}). Potential pullback ahead.",
                 })
-            elif rsi_val <= 30:
+            elif rsi_val <= rsi_oversold:
                 signals.append({
-                    "label":  "RSI",
-                    "flag":   "bullish",
-                    "reason": f"RSI is {rsi_val:.1f} — oversold (≤30). Potential bounce ahead.",
+                    "label": "RSI",
+                    "flag": "bullish",
+                    "reason": f"RSI is {rsi_val:.1f} — oversold (≤{rsi_oversold}). Potential bounce ahead.",
                 })
             else:
                 signals.append({
-                    "label":  "RSI",
-                    "flag":   "neutral",
+                    "label": "RSI",
+                    "flag": "neutral",
                     "reason": f"RSI is {rsi_val:.1f} — neutral range.",
                 })
 
@@ -79,14 +85,14 @@ def get_signals(ticker: str) -> list[dict]:
 
     if high52 and current_price >= high52 * 0.95:
         signals.append({
-            "label":  "52W High",
-            "flag":   "bullish",
+            "label": "52W High",
+            "flag": "bullish",
             "reason": f"Within 5% of 52-week high (${high52:.2f}). Strong momentum.",
         })
     if low52 and current_price <= low52 * 1.05:
         signals.append({
-            "label":  "52W Low",
-            "flag":   "bearish",
+            "label": "52W Low",
+            "flag": "bearish",
             "reason": f"Within 5% of 52-week low (${low52:.2f}). Significant weakness.",
         })
 
@@ -102,8 +108,8 @@ FLAG_COLORS = {
 # ── Load watchlist ────────────────────────────────────────────────────────────
 
 watchlist = get_watchlist()
-tickers   = [w["ticker"] for w in watchlist]
-prices    = get_bulk_current_prices(tickers) if tickers else {}
+tickers = [w["ticker"] for w in watchlist]
+prices = get_bulk_current_prices(tickers) if tickers else {}
 
 # ── Watchlist table ───────────────────────────────────────────────────────────
 
@@ -113,9 +119,9 @@ else:
     st.subheader("Watchlist")
 
     for item in watchlist:
-        ticker       = item["ticker"]
+        ticker  = item["ticker"]
         target_price = item["target_price"]
-        current      = prices.get(ticker)
+        current  = prices.get(ticker)
 
         with st.expander(
             f"**{ticker}** — "
@@ -210,9 +216,9 @@ st.subheader("Add to Watchlist")
 
 with st.form("add_watchlist_form", clear_on_submit=True):
     col1, col2, col3 = st.columns([2, 1.5, 3])
-    new_ticker  = col1.text_input("Ticker", placeholder="e.g. TSLA").upper().strip()
-    new_target  = col2.number_input("Target Price (optional)", min_value=0.0, step=0.01, format="%.2f")
-    new_notes   = col3.text_input("Notes (optional)", placeholder="e.g. watching for breakout")
+    new_ticker = col1.text_input("Ticker", placeholder="e.g. TSLA").upper().strip()
+    new_target = col2.number_input("Target Price (optional)", min_value=0.0, step=0.01, format="%.2f")
+    new_notes  = col3.text_input("Notes (optional)", placeholder="e.g. watching for breakout")
 
     if st.form_submit_button("Add to Watchlist"):
         if not new_ticker:

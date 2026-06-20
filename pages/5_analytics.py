@@ -17,6 +17,9 @@ from utils.metrics import (
 st.set_page_config(page_title="Analytics", layout="wide")
 initialize_db()
 
+from utils.theme import apply_theme
+apply_theme()
+
 st.title("Analytics")
 
 # ── Rebuild holdings ───────────────────────────────────────────────────────────
@@ -29,15 +32,15 @@ def compute_holdings(transactions):
     holdings = []
     for ticker, txs in by_ticker.items():
         shares_held = 0.0
-        cost_basis  = 0.0
+        cost_basis = 0.0
         for tx in txs:
             if tx["type"] == "buy":
-                cost_basis  += tx["shares"] * tx["price"]
+                cost_basis += tx["shares"] * tx["price"]
                 shares_held += tx["shares"]
             elif tx["type"] == "sell" and shares_held > 0:
-                avg  = cost_basis / shares_held
+                avg = cost_basis / shares_held
                 sell = min(tx["shares"], shares_held)
-                cost_basis  -= sell * avg
+                cost_basis -= sell * avg
                 shares_held -= sell
         if shares_held > 0.0001:
             holdings.append({"ticker": ticker, "shares": shares_held, "cost_basis": cost_basis})
@@ -46,7 +49,7 @@ def compute_holdings(transactions):
 
 
 transactions = get_transactions()
-holdings     = compute_holdings(transactions)
+holdings = compute_holdings(transactions)
 
 if not holdings:
     st.info("No holdings yet — add transactions on the Portfolio page.")
@@ -57,13 +60,13 @@ tickers = [h["ticker"] for h in holdings]
 # ── Period selector ────────────────────────────────────────────────────────────
 
 PERIOD_OPTIONS = {
-    "1 Month":  "1mo",
+    "1 Month": "1mo",
     "3 Months": "3mo",
     "6 Months": "6mo",
-    "1 Year":   "1y",
-    "2 Years":  "2y",
-    "5 Years":  "5y",
-    "Max":      "max",
+    "1 Year": "1y",
+    "2 Years": "2y",
+    "5 Years": "5y",
+    "Max": "max",
 }
 
 selected_label = st.selectbox("Period", list(PERIOD_OPTIONS.keys()), index=3)
@@ -100,10 +103,12 @@ if portfolio_value_series.empty:
 
 # ── Summary metrics ────────────────────────────────────────────────────────────
 
-total_return      = calculate_total_return(portfolio_value_series)
+total_return = calculate_total_return(portfolio_value_series)
 annualized_return = calculate_annualized_return(portfolio_value_series)
-returns           = calculate_returns(portfolio_value_series)
-sharpe            = calculate_sharpe_ratio(returns)
+returns = calculate_returns(portfolio_value_series)
+from database import get_setting
+rf_rate = float(str(get_setting("sharpe_rf_rate", "4.0"))) / 100
+sharpe = calculate_sharpe_ratio(returns, risk_free_rate=rf_rate)
 
 spy_total_return = calculate_total_return(spy_close) if not spy_close.empty else None
 

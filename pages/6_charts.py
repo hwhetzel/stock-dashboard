@@ -11,6 +11,9 @@ from utils.indicators import compute_moving_averages, compute_rsi, compute_macd
 st.set_page_config(page_title="Charts", layout="wide")
 initialize_db()
 
+from utils.theme import apply_theme
+apply_theme()
+
 st.title("Charts")
 
 # ── Build ticker list from holdings + watchlist ───────────────────────────────
@@ -33,10 +36,10 @@ def get_held_tickers(transactions):
     return held
 
 
-transactions    = get_transactions()
-held_tickers    = get_held_tickers(transactions)
-watchlist       = get_watchlist()
-watch_tickers   = [w["ticker"] for w in watchlist]
+transactions = get_transactions()
+held_tickers = get_held_tickers(transactions)
+watchlist = get_watchlist()
+watch_tickers = [w["ticker"] for w in watchlist]
 
 # Combine and deduplicate, held tickers first
 all_tickers = list(dict.fromkeys(held_tickers + watch_tickers))
@@ -54,12 +57,12 @@ with col1:
 
 with col2:
     PERIOD_OPTIONS = {
-        "1 Month":  "1mo",
+        "1 Month": "1mo",
         "3 Months": "3mo",
         "6 Months": "6mo",
-        "1 Year":   "1y",
-        "2 Years":  "2y",
-        "5 Years":  "5y",
+        "1 Year": "1y",
+        "2 Years": "2y",
+        "5 Years": "5y",
     }
     selected_period_label = st.selectbox("Period", list(PERIOD_OPTIONS.keys()), index=3)
     selected_period = PERIOD_OPTIONS[selected_period_label]
@@ -70,15 +73,15 @@ with col3:
 # MA overlays
 st.markdown("**Moving Average Overlays**")
 ma_col1, ma_col2, ma_col3, ma_col4 = st.columns(4)
-show_ma20  = ma_col1.checkbox("MA 20",  value=False)
-show_ma50  = ma_col2.checkbox("MA 50",  value=True)
+show_ma20 = ma_col1.checkbox("MA 20",  value=False)
+show_ma50 = ma_col2.checkbox("MA 50",  value=True)
 show_ma100 = ma_col3.checkbox("MA 100", value=False)
 show_ma200 = ma_col4.checkbox("MA 200", value=True)
 
 # Indicator panels
 st.markdown("**Indicator Panels**")
 ind_col1, ind_col2 = st.columns(2)
-show_rsi  = ind_col1.checkbox("RSI (14)", value=True)
+show_rsi = ind_col1.checkbox("RSI (14)", value=True)
 show_macd = ind_col2.checkbox("MACD",     value=True)
 
 st.divider()
@@ -96,34 +99,34 @@ if hist.empty:
 if hist.index.tz is not None: # type: ignore
     hist.index = hist.index.tz_convert(None)  # type: ignore
 
-close  = hist["Close"]
-open_  = hist["Open"]
-high   = hist["High"]
-low    = hist["Low"]
+close = hist["Close"]
+open_ = hist["Open"]
+high = hist["High"]
+low = hist["Low"]
 volume = hist["Volume"]
 
 # ── Compute indicators ────────────────────────────────────────────────────────
 
 ma_windows = []
-if show_ma20:  ma_windows.append(20)
-if show_ma50:  ma_windows.append(50)
+if show_ma20: ma_windows.append(20)
+if show_ma50: ma_windows.append(50)
 if show_ma100: ma_windows.append(100)
 if show_ma200: ma_windows.append(200)
 
-mas      = compute_moving_averages(close, windows=ma_windows) if ma_windows else pd.DataFrame()
-rsi      = compute_rsi(close, period=14)
-macd_df  = compute_macd(close)
+mas = compute_moving_averages(close, windows=ma_windows) if ma_windows else pd.DataFrame()
+rsi = compute_rsi(close, period=14)
+macd_df = compute_macd(close)
 
 # ── Build subplot layout ──────────────────────────────────────────────────────
 # Rows: price (always) + volume (always) + RSI (optional) + MACD (optional)
 
-num_panels   = 2 + int(show_rsi) + int(show_macd)
-row_heights  = [0.55, 0.15]
-if show_rsi:  row_heights.append(0.15)
+num_panels = 2 + int(show_rsi) + int(show_macd)
+row_heights = [0.55, 0.15]
+if show_rsi: row_heights.append(0.15)
 if show_macd: row_heights.append(0.15)
 
 subplot_titles = [selected_ticker, "Volume"]
-if show_rsi:  subplot_titles.append("RSI (14)")
+if show_rsi: subplot_titles.append("RSI (14)")
 if show_macd: subplot_titles.append("MACD")
 
 fig = make_subplots(

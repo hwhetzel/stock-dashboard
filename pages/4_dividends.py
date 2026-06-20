@@ -10,6 +10,9 @@ from data import get_dividends, get_dividend_calendar, get_bulk_current_prices
 st.set_page_config(page_title="Dividends", layout="wide")
 initialize_db()
 
+from utils.theme import apply_theme
+apply_theme()
+
 st.title("Dividends")
 
 # ── Rebuild holdings from transactions ────────────────────────────────────────
@@ -39,33 +42,33 @@ def compute_holdings(transactions):
 
 
 transactions = get_transactions()
-holdings     = compute_holdings(transactions)
+holdings = compute_holdings(transactions)
 
 if not holdings:
     st.info("No holdings yet — add transactions on the Portfolio page.")
     st.stop()
 
 tickers = [h["ticker"] for h in holdings]
-prices  = get_bulk_current_prices(tickers)
+prices = get_bulk_current_prices(tickers)
 
 # ── Per-holding dividend data ──────────────────────────────────────────────────
 # Build a combined record: dividend history, annual income, yield, ex-div date
 
 dividend_data = []        # for summary table
-all_payments  = []        # for income-over-time chart (one row per payment)
+all_payments = []        # for income-over-time chart (one row per payment)
 
 for h in holdings:
     ticker = h["ticker"]
     shares = h["shares"]
 
     div_history = get_dividends(ticker)          # Series: date -> per-share amount
-    calendar    = get_dividend_calendar(ticker)   # dict: ex_dividend_date, dividend_rate, etc.
+    calendar = get_dividend_calendar(ticker)   # dict: ex_dividend_date, dividend_rate, etc.
 
     # Annual income estimate = current dividend rate * shares held
-    annual_rate    = calendar.get("dividend_rate") or 0
-    annual_income  = annual_rate * shares
-    div_yield      = calendar.get("dividend_yield")
-    price          = prices.get(ticker)
+    annual_rate  = calendar.get("dividend_rate") or 0
+    annual_income = annual_rate * shares
+    div_yield = calendar.get("dividend_yield")
+    price = prices.get(ticker)
 
     # Format ex-dividend date (yfinance returns a unix timestamp or None)
     ex_date_raw = calendar.get("ex_dividend_date")
@@ -77,12 +80,12 @@ for h in holdings:
             ex_date_str = "N/A"
 
     dividend_data.append({
-        "Ticker":            ticker,
-        "Shares":            round(shares, 4),
+        "Ticker": ticker,
+        "Shares": round(shares, 4),
         "Annual Rate/Share": annual_rate,
         "Est. Annual Income": round(annual_income, 2),
-        "Yield":             div_yield,
-        "Next Ex-Div Date":  ex_date_str,
+        "Yield": div_yield,
+        "Next Ex-Div Date": ex_date_str,
     })
 
     # Build payment history rows (amount received = per-share div * shares held at that time)
@@ -92,7 +95,7 @@ for h in holdings:
     if not div_history.empty:
         for pay_date, per_share in div_history.items():
             all_payments.append({
-                "Date":   pay_date,
+                "Date": pay_date,
                 "Ticker": ticker,
                 "Amount": per_share * shares,
             })
@@ -171,7 +174,7 @@ else:
     payments_df = payments_df[payments_df["Date"] >= cutoff]
 
     display_payments = payments_df.copy()
-    display_payments["Date"]   = display_payments["Date"].dt.strftime("%Y-%m-%d")
+    display_payments["Date"] = display_payments["Date"].dt.strftime("%Y-%m-%d")
     display_payments["Amount"] = display_payments["Amount"].map("${:.2f}".format)
 
     st.dataframe(display_payments, use_container_width=True, hide_index=True)

@@ -9,6 +9,9 @@ from data import get_ticker_info, is_valid_ticker
 st.set_page_config(page_title="Screener", layout="wide")
 initialize_db()
 
+from utils.theme import apply_theme
+apply_theme()
+
 st.title("Stock Screener")
 
 st.caption(
@@ -62,8 +65,8 @@ def score_ticker(info: dict, weights: dict) -> dict:
     # Uses 52-week price change: (current - 52wLow) / (52wHigh - 52wLow)
     # Score 100 if at 52W high, 0 if at 52W low.
     current = info.get("currentPrice") or info.get("regularMarketPrice")
-    high52  = info.get("fiftyTwoWeekHigh")
-    low52   = info.get("fiftyTwoWeekLow")
+    high52 = info.get("fiftyTwoWeekHigh")
+    low52 = info.get("fiftyTwoWeekLow")
     if current and high52 and low52 and (high52 - low52) > 0:
         momentum_score = ((current - low52) / (high52 - low52)) * 100
         scores["momentum"] = round(momentum_score, 2)
@@ -135,26 +138,26 @@ if config_names:
 if selected_config and selected_config in saved_configs:
     default_weights = saved_configs[selected_config]
 else:
+    from database import get_setting
     default_weights = {
-        "pe":        1.0,
-        "growth":    1.0,
-        "momentum":  1.0,
-        "upside":    1.0,
-        "div_yield": 1.0,
+        "pe": float(str(get_setting("screener_w_pe", "1.0"))),
+        "growth": float(str(get_setting("screener_w_growth", "1.0"))),
+        "momentum": float(str(get_setting("screener_w_momentum", "1.0"))),
+        "upside": float(str(get_setting("screener_w_upside", "1.0"))),
+        "div_yield": float(str(get_setting("screener_w_div_yield", "1.0"))),
     }
-
 w_col1, w_col2, w_col3, w_col4, w_col5 = st.columns(5)
-w_pe       = w_col1.slider("P/E",            0.0, 3.0, float(default_weights.get("pe",        1.0)), 0.5)
-w_growth   = w_col2.slider("EPS Growth",     0.0, 3.0, float(default_weights.get("growth",    1.0)), 0.5)
-w_momentum = w_col3.slider("Momentum",       0.0, 3.0, float(default_weights.get("momentum",  1.0)), 0.5)
-w_upside   = w_col4.slider("Analyst Upside", 0.0, 3.0, float(default_weights.get("upside",    1.0)), 0.5)
-w_div      = w_col5.slider("Div Yield",      0.0, 3.0, float(default_weights.get("div_yield", 1.0)), 0.5)
+w_pe = w_col1.slider("P/E", 0.0, 3.0, float(default_weights.get("pe", 1.0)), 0.5)
+w_growth = w_col2.slider("EPS Growth", 0.0, 3.0, float(default_weights.get("growth", 1.0)), 0.5)
+w_momentum = w_col3.slider("Momentum", 0.0, 3.0, float(default_weights.get("momentum", 1.0)), 0.5)
+w_upside = w_col4.slider("Analyst Upside", 0.0, 3.0, float(default_weights.get("upside", 1.0)), 0.5)
+w_div = w_col5.slider("Div Yield", 0.0, 3.0, float(default_weights.get("div_yield", 1.0)), 0.5)
 
 weights = {
-    "pe":        w_pe,
-    "growth":    w_growth,
-    "momentum":  w_momentum,
-    "upside":    w_upside,
+    "pe": w_pe,
+    "growth": w_growth,
+    "momentum": w_momentum,
+    "upside": w_upside,
     "div_yield": w_div,
 }
 
