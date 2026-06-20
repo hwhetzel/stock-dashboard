@@ -6,7 +6,7 @@ def apply_theme():
     Inject CSS to apply light or dark mode based on the stored setting.
     Call this at the top of every page after initialize_db().
     """
-    theme = get_setting("theme", "Light")
+    theme = get_setting("theme", "Dark")
 
     if theme == "Dark":
         css = """

@@ -31,8 +31,8 @@ def s(key, default):
 
 st.subheader("Appearance")
 
-theme = s("theme", "Light")
-new_theme = st.radio("Theme", ["Light", "Dark"], index=0 if theme == "Light" else 1, horizontal=True)
+theme = s("theme", "Dark")
+new_theme = st.radio("Theme", ["Light", "Dark"], index=1 if theme == "Dark" else 0, horizontal=True)
 if new_theme != theme:
     set_setting("theme", new_theme)
     st.rerun()
