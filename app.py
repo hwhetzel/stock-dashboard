@@ -1,36 +1,19 @@
 import streamlit as st
-from database import initialize_db, get_transactions
-from data import get_bulk_current_prices, get_news, get_ticker_info
+from datetime import datetime, timedelta
+import yfinance as yf
+from database import initialize_db, get_transactions, get_watchlist, get_setting
+from data import get_bulk_current_prices, get_news
+from utils.theme import apply_theme
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
-st.set_page_config(
-    page_title="Stock Dashboard",
-    page_icon="📈",
-    layout="wide",
-)
-
+st.set_page_config(page_title="Stock Dashboard", page_icon="📈", layout="wide")
 initialize_db()
-
-from utils.theme import apply_theme
 apply_theme()
 
-# ── Header ────────────────────────────────────────────────────────────────────
+# ── Holdings builder ──────────────────────────────────────────────────────────
 
-st.title("📈 Stock Dashboard")
-st.caption("Your personal portfolio overview.")
-
-st.divider()
-
-# ── Portfolio summary metrics ─────────────────────────────────────────────────
-
-transactions = get_transactions()
-
-def compute_summary(transactions):
-    """
-    Re-derive holdings from transactions and fetch live prices.
-    Returns total portfolio value, cost basis, and unrealized G/L.
-    """
+def compute_holdings(transactions):
     by_ticker = {}
     for tx in sorted(transactions, key=lambda x: x["date"]):
         by_ticker.setdefault(tx["ticker"], []).append(tx)
@@ -46,7 +29,7 @@ def compute_summary(transactions):
             elif tx["type"] == "sell" and shares_held > 0:
                 avg = cost_basis / shares_held
                 sell = min(tx["shares"], shares_held)
-                cost_basis  -= sell * avg
+                cost_basis -= sell * avg
                 shares_held -= sell
         if shares_held > 0.0001:
             holdings.append({
@@ -54,106 +37,244 @@ def compute_summary(transactions):
                 "shares": shares_held,
                 "cost_basis": cost_basis,
             })
+    return holdings
 
-    if not holdings:
-        return None
+# ── Load data ─────────────────────────────────────────────────────────────────
 
-    tickers = [h["ticker"] for h in holdings]
-    prices = get_bulk_current_prices(tickers)
+transactions = get_transactions()
+holdings = compute_holdings(transactions)
 
-    total_value = sum(h["shares"] * prices.get(h["ticker"], 0) for h in holdings)
-    total_cost = sum(h["cost_basis"] for h in holdings)
-    total_unreal = total_value - total_cost
-    total_unreal_p = (total_unreal / total_cost * 100) if total_cost else 0
+st.title("📈 Stock Dashboard")
+st.caption(f"Last updated: {datetime.now().strftime('%b %d, %Y %I:%M %p')}")
+st.divider()
 
-    return {
-        "holdings": holdings,
-        "prices": prices,
-        "total_value": total_value,
-        "total_cost": total_cost,
-        "total_unreal": total_unreal,
-        "total_unreal_p": total_unreal_p,
-        "num_holdings": len(holdings),
-    }
-
-summary = compute_summary(transactions)
-
-if summary is None:
+if not holdings:
     st.info("No holdings yet — head to the **Portfolio** page to add transactions.")
-else:
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Portfolio Value", f"${summary['total_value']:,.2f}")
-    c2.metric("Total Cost Basis", f"${summary['total_cost']:,.2f}")
-    c3.metric(
-        "Unrealized G/L",
-        f"${summary['total_unreal']:,.2f}",
-        delta=f"{summary['total_unreal_p']:.2f}%",
-    )
-    c4.metric("Holdings", summary["num_holdings"])
+    st.stop()
 
-    st.divider()
+tickers = [h["ticker"] for h in holdings]
+prices = get_bulk_current_prices(tickers)
 
-    # ── Per-holding snapshot ──────────────────────────────────────────────────
+# ── Day change data ───────────────────────────────────────────────────────────
 
+def get_day_change(ticker: str) -> dict:
+    """Return current price, previous close, day change $ and % for a ticker."""
+    try:
+        info = yf.Ticker(ticker).fast_info
+        current = info.get("last_price")
+        prev = info.get("previous_close")
+        if current and prev and prev > 0:
+            change = current - prev
+            change_pct = (change / prev) * 100
+            return {
+                "current": round(current, 2),
+                "prev": round(prev, 2),
+                "change": round(change, 2),
+                "change_pct": round(change_pct, 2),
+            }
+    except Exception:
+        pass
+    return {"current": None, "prev": None, "change": None, "change_pct": None}
+
+day_data = {h["ticker"]: get_day_change(h["ticker"]) for h in holdings}
+
+# ── Compute portfolio totals ──────────────────────────────────────────────────
+
+total_value = 0.0
+total_cost = 0.0
+total_day_change = 0.0
+
+for h in holdings:
+    ticker = h["ticker"]
+    price = prices.get(ticker) or 0
+    mkt_val = h["shares"] * price
+    total_value += mkt_val
+    total_cost += h["cost_basis"]
+    d = day_data.get(ticker, {})
+    if d.get("change") is not None:
+        total_day_change += d["change"] * h["shares"]
+
+total_unrealized = total_value - total_cost
+total_unrealized_pct = (total_unrealized / total_cost * 100) if total_cost else 0
+total_day_change_pct = (total_day_change / (total_value - total_day_change) * 100) if (total_value - total_day_change) else 0
+
+# ── 6 summary cards in 3x2 grid ──────────────────────────────────────────────
+
+st.subheader("Portfolio Summary")
+
+row1_c1, row1_c2, row1_c3 = st.columns(3)
+row1_c1.metric("Portfolio Value", f"${total_value:,.2f}")
+row1_c2.metric("Total Cost Basis", f"${total_cost:,.2f}")
+row1_c3.metric("Holdings", len(holdings))
+
+row2_c1, row2_c2, row2_c3 = st.columns(3)
+row2_c1.metric(
+    "Unrealized G/L",
+    f"${total_unrealized:,.2f}",
+    delta=f"{total_unrealized_pct:+.2f}%",
+)
+row2_c2.metric(
+    "Total G/L",
+    f"${total_unrealized:,.2f}",
+    delta=f"{total_unrealized_pct:+.2f}%",
+)
+row2_c3.metric(
+    "Day Change",
+    f"${total_day_change:,.2f}",
+    delta=f"{total_day_change_pct:+.2f}%",
+)
+
+st.divider()
+
+# ── Holdings snapshot table + news side by side ───────────────────────────────
+
+snap_col, news_col = st.columns([3, 2])
+
+with snap_col:
     st.subheader("Holdings Snapshot")
 
-    cols = st.columns(min(len(summary["holdings"]), 4))
-    for i, h in enumerate(summary["holdings"]):
+    snap_rows = []
+    for h in holdings:
         ticker = h["ticker"]
-        price = summary["prices"].get(ticker)
+        price = prices.get(ticker)
         mkt_val = h["shares"] * price if price else None
-        unreal = mkt_val - h["cost_basis"] if mkt_val else None
-        unreal_p = (unreal / h["cost_basis"] * 100) if unreal and h["cost_basis"] else None
+        unreal = (mkt_val - h["cost_basis"]) if mkt_val else None
+        unreal_pct = (unreal / h["cost_basis"] * 100) if unreal and h["cost_basis"] else None
+        d = day_data.get(ticker, {})
 
-        col = cols[i % 4]
-        with col:
-            st.markdown(f"**{ticker}**")
-            if price is not None:
-                st.markdown(f"${price:,.2f}")
-            if unreal is not None and unreal_p is not None:
-                color = "green" if unreal >= 0 else "red"
-                sign  = "+" if unreal >= 0 else ""
-                st.markdown(
-                    f"<span style='color:{color}'>{sign}${unreal:,.2f} "
-                    f"({sign}{unreal_p:.2f}%)</span>",
-                    unsafe_allow_html=True,
-                )
-            st.caption(f"{h['shares']:.4f} shares")
+        snap_rows.append({
+            "Ticker": ticker,
+            "Price": f"${price:,.2f}" if price else "N/A",
+            "Value": f"${mkt_val:,.2f}" if mkt_val else "N/A",
+            "Day %": f"{d['change_pct']:+.2f}%" if d.get("change_pct") is not None else "N/A",
+            "Total G/L %": f"{unreal_pct:+.2f}%" if unreal_pct is not None else "N/A",
+        })
 
-    st.divider()
+    snap_df = st.dataframe(
+        snap_rows,
+        use_container_width=True,
+        hide_index=True,
+    )
 
-    # ── News feed for holdings ────────────────────────────────────────────────
-
+with news_col:
     st.subheader("Latest News")
 
-    # Let the user pick which holding to show news for
-    tickers_held = [h["ticker"] for h in summary["holdings"]]
-    news_ticker = st.selectbox("News for", tickers_held, label_visibility="collapsed")
+    # Collect up to 1 article per ticker, show 4 most recent total
+    news_items = []
+    for ticker in tickers:
+        articles = get_news(ticker, limit=2)
+        for a in articles:
+            news_items.append({
+                "ticker": ticker,
+                "title": a.get("title", "No title"),
+                "publisher": a.get("publisher", ""),
+                "link": a.get("link", "#"),
+                "published": a.get("published", ""),
+            })
 
-    articles = get_news(news_ticker or "", limit=8)
-    if not articles:
-        st.caption("No recent news found.")
+    # Show 4 most recent
+    shown = news_items[:4]
+
+    if not shown:
+        st.caption("No news available.")
     else:
-        for article in articles:
-            title = article.get("title", "No title")
-            publisher = article.get("publisher", "")
-            link = article.get("link", "#")
-            st.markdown(f"- [{title}]({link}) — *{publisher}*")
+        html_lines = []
+        for item in shown:
+            ticker = item["ticker"]
 
-    st.divider()
+            # Badge color based on day change
+            d = day_data.get(ticker, {})
+            change = d.get("change_pct")
+            if change is not None and change > 0:
+                badge_color = "#1a7a1a"
+            elif change is not None and change < 0:
+                badge_color = "#a00000"
+            else:
+                badge_color = "#1a5276"
 
-    # ── Quick links ───────────────────────────────────────────────────────────
+            badge = (
+                f"<span style='background-color:{badge_color};color:white;"
+                f"padding:2px 6px;border-radius:4px;font-size:0.7rem;"
+                f"font-weight:bold;margin-right:6px;'>{ticker}</span>"
+            )
+            pub = f"<br><span style='color:gray;font-size:0.75rem;'>{item['publisher']} · {item['published']}</span>" if item["published"] else ""
 
-    st.subheader("Quick Links")
+            html_lines.append(
+                f"<div style='padding:6px 0;border-bottom:1px solid #2d3139;'>"
+                f"{badge}"
+                f"<a href='{item['link']}' target='_blank' style='text-decoration:none;font-size:0.88rem;'>"
+                f"{item['title']}</a>"
+                f"{pub}"
+                f"</div>"
+            )
 
-    ql1, ql2, ql3, ql4 = st.columns(4)
-    ql1.page_link("pages/1_portfolio.py", label="Portfolio",  icon="💼")
-    ql2.page_link("pages/2_allocation.py", label="Allocation", icon="🥧")
-    ql3.page_link("pages/4_dividends.py", label="Dividends",  icon="💰")
-    ql4.page_link("pages/5_analytics.py", label="Analytics",  icon="📊")
+        st.markdown("".join(html_lines), unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.page_link("pages/9_news.py", label="View all news →")
 
-    ql5, ql6, ql7, ql8 = st.columns(4)
-    ql5.page_link("pages/3_watchlist.py", label="Watchlist",  icon="👀")
-    ql6.page_link("pages/6_charts.py", label="Charts",     icon="📉")
-    ql7.page_link("pages/7_earnings.py", label="Earnings",   icon="📅")
-    ql8.page_link("pages/8_screener.py", label="Screener",   icon="🔍")
+st.divider()
+
+# ── Since you were gone ───────────────────────────────────────────────────────
+
+st.subheader("Since You Were Gone")
+st.caption("What changed since your last session.")
+
+# Holdings that moved significantly today
+significant_threshold = float(str(get_setting("notify_price_change_pct", "2.0")))
+moved = []
+for h in holdings:
+    d = day_data.get(h["ticker"], {})
+    if d.get("change_pct") is not None and abs(d["change_pct"]) >= significant_threshold:
+        moved.append((h["ticker"], d["change_pct"], d["current"]))
+
+if moved:
+    st.markdown("**📊 Holdings with significant moves today:**")
+    for ticker, pct, price in moved:
+        sign = "+" if pct >= 0 else ""
+        color = "green" if pct >= 0 else "red"
+        st.markdown(
+            f"<span style='color:{color}'>**{ticker}** ${price} ({sign}{pct:.2f}%)</span>",
+            unsafe_allow_html=True,
+        )
+else:
+    st.caption("No significant holdings movement today.")
+
+# Upcoming earnings in next 7 days
+from data import get_earnings_dates
+import pandas as pd
+now = datetime.now()
+week_end = now + timedelta(days=7)
+earnings_soon = []
+for ticker in tickers:
+    try:
+        df = get_earnings_dates(ticker, limit=4)
+        if df.empty:
+            continue
+        for dt in df.index:
+            dt_naive = dt.tz_localize(None) if hasattr(dt, "tzinfo") and dt.tzinfo else dt
+            if now <= dt_naive <= week_end:
+                earnings_soon.append((ticker, dt_naive.strftime("%Y-%m-%d")))
+    except Exception:
+        pass
+
+if earnings_soon:
+    st.markdown("**📅 Upcoming earnings (next 7 days):**")
+    for ticker, dt in earnings_soon:
+        st.markdown(f"- **{ticker}** — {dt}")
+
+st.divider()
+
+# ── Quick links ───────────────────────────────────────────────────────────────
+
+st.subheader("Quick Links")
+ql1, ql2, ql3, ql4 = st.columns(4)
+ql1.page_link("pages/1_portfolio.py",  label="Portfolio",  icon="💼")
+ql2.page_link("pages/2_allocation.py", label="Allocation", icon="🥧")
+ql3.page_link("pages/4_dividends.py",  label="Dividends",  icon="💰")
+ql4.page_link("pages/5_analytics.py",  label="Analytics",  icon="📊")
+
+ql5, ql6, ql7, ql8 = st.columns(4)
+ql5.page_link("pages/3_watchlist.py",  label="Watchlist",  icon="👀")
+ql6.page_link("pages/6_charts.py",     label="Charts",     icon="📉")
+ql7.page_link("pages/7_earnings.py",   label="Earnings",   icon="📅")
+ql8.page_link("pages/8_screener.py",   label="Screener",   icon="🔍")
