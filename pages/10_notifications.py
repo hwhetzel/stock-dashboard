@@ -169,47 +169,55 @@ unread = get_unread_count()
 if unread > 0:
     st.info(f"📬 {unread} unread notification{'s' if unread != 1 else ''}")
 
-# ── Bulk actions ──────────────────────────────────────────────────────────────
+# ── Bulk actions ─────────────────────────────────────────────────────────────
 
 if notifications:
-    st.markdown("**Bulk Actions**")
-    bulk_col1, bulk_col2, bulk_col3 = st.columns([1, 1, 4])
+    if "selected_ids" not in st.session_state:
+        st.session_state["selected_ids"] = []
 
-    select_all = bulk_col1.button("Select All")
-    clear_all  = bulk_col2.button("🗑 Clear All", type="primary")
+    bulk_col1, bulk_col2, bulk_col3, bulk_col4 = st.columns([1, 1, 1, 3])
 
-    if clear_all:
+    if bulk_col1.button("Select All"):
+        st.session_state["selected_ids"] = [n["id"] for n in notifications]
+        for n in notifications:
+            st.session_state[f"chk_{n['id']}"] = True
+        st.rerun()
+
+    if bulk_col2.button("Deselect All"):
+        st.session_state["selected_ids"] = []
+        for n in notifications:
+            st.session_state[f"chk_{n['id']}"] = False
+        st.rerun()
+
+    if bulk_col3.button("🗑 Clear All", type="primary"):
         st.session_state["confirm_clear_all"] = True
 
     if st.session_state.get("confirm_clear_all"):
         st.warning("Are you sure you want to delete all notifications?")
         conf_col1, conf_col2 = st.columns([1, 5])
-        if conf_col1.button("Yes, delete all"):
+        if conf_col1.button("Yes, delete all", key="confirm_clear_all_yes"):
             delete_all_notifications()
+            st.session_state["selected_ids"] = []
             st.session_state.pop("confirm_clear_all", None)
             st.rerun()
-        if conf_col2.button("Cancel"):
+        if conf_col2.button("Cancel", key="confirm_clear_all_cancel"):
             st.session_state.pop("confirm_clear_all", None)
             st.rerun()
 
-    if select_all:
-        st.session_state["selected_ids"] = [n["id"] for n in notifications]
-
-    # Delete selected
     selected_ids = st.session_state.get("selected_ids", [])
     if selected_ids:
-        if st.button(f"🗑 Delete Selected ({len(selected_ids)})"):
+        if st.button(f"🗑 Delete Selected ({len(selected_ids)})", key="delete_selected_btn"):
             st.session_state["confirm_delete_selected"] = True
 
         if st.session_state.get("confirm_delete_selected"):
             st.warning(f"Delete {len(selected_ids)} selected notification(s)?")
             dc1, dc2 = st.columns([1, 5])
-            if dc1.button("Yes, delete"):
-                delete_notifications(selected_ids)
-                st.session_state.pop("selected_ids", None)
+            if dc1.button("Yes, delete", key="confirm_delete_selected_yes"):
+                delete_notifications(list(selected_ids))
+                st.session_state["selected_ids"] = []
                 st.session_state.pop("confirm_delete_selected", None)
                 st.rerun()
-            if dc2.button("Cancel "):
+            if dc2.button("Cancel", key="confirm_delete_selected_cancel"):
                 st.session_state.pop("confirm_delete_selected", None)
                 st.rerun()
 
@@ -220,22 +228,28 @@ if notifications:
 if not notifications:
     st.info("No notifications yet. They will appear here when you open the app and there are changes to report.")
 else:
-    if "selected_ids" not in st.session_state:
-        st.session_state["selected_ids"] = []
-
     for notif in notifications:
         n_id = notif["id"]
         summary = notif["summary"]
         created = notif["created_at"]
-        is_selected = n_id in st.session_state["selected_ids"]
 
         with st.expander(f"📋 Session — {created}", expanded=False):
-            # Checkbox for selection
-            checked = st.checkbox("Select", value=is_selected, key=f"chk_{n_id}")
-            if checked and n_id not in st.session_state["selected_ids"]:
-                st.session_state["selected_ids"].append(n_id)
-            elif not checked and n_id in st.session_state["selected_ids"]:
-                st.session_state["selected_ids"].remove(n_id)
+            # Checkbox drives session state directly via on_change
+            def on_check(nid=n_id):
+                key = f"chk_{nid}"
+                if st.session_state[key]:
+                    if nid not in st.session_state["selected_ids"]:
+                        st.session_state["selected_ids"].append(nid)
+                else:
+                    if nid in st.session_state["selected_ids"]:
+                        st.session_state["selected_ids"].remove(nid)
+
+            st.checkbox(
+                "Select for deletion",
+                value=n_id in st.session_state.get("selected_ids", []),
+                key=f"chk_{n_id}",
+                on_change=on_check,
+            )
 
             # ── Holdings movement ─────────────────────────────────────────────
             movements = summary.get("holdings_movement", [])
@@ -281,6 +295,8 @@ else:
                 if d1.button("Yes", key=f"yes_{n_id}"):
                     delete_notification(n_id)
                     st.session_state.pop("confirm_delete_id", None)
+                    if n_id in st.session_state.get("selected_ids", []):
+                        st.session_state["selected_ids"].remove(n_id)
                     st.rerun()
                 if d2.button("No", key=f"no_{n_id}"):
                     st.session_state.pop("confirm_delete_id", None)
