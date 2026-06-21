@@ -81,12 +81,12 @@ def generate_session_summary() -> dict:
     for h in holdings:
         ticker = h["ticker"]
         try:
-            info = yf.Ticker(ticker).fast_info
-            current = info.get("last_price")
-            prev = info.get("previous_close")
+            fi = yf.Ticker(ticker).fast_info
+            current = fi.last_price
+            prev = fi.previous_close
             if current and prev and prev > 0:
                 change_pct = (current - prev) / prev * 100
-                if notify_holdings_on and abs(change_pct) >= price_threshold:
+                if abs(change_pct) >= 2.0:
                     holdings_movement.append({
                         "ticker": ticker,
                         "change_pct": round(change_pct, 2),
@@ -100,12 +100,12 @@ def generate_session_summary() -> dict:
     for w in watchlist:
         ticker = w["ticker"]
         try:
-            info = yf.Ticker(ticker).fast_info
-            current = info.get("last_price")
-            prev = info.get("previous_close")
+            fi = yf.Ticker(ticker).fast_info
+            current = fi.last_price
+            prev = fi.previous_close
             if current and prev and prev > 0:
                 change_pct = (current - prev) / prev * 100
-                if notify_watchlist_on and abs(change_pct) >= watch_threshold:
+                if abs(change_pct) >= 1.0:
                     watchlist_changes.append({
                         "ticker": ticker,
                         "change_pct": round(change_pct, 2),
@@ -149,7 +149,6 @@ if "notification_generated" not in st.session_state:
     st.session_state["notification_generated"] = True
     with st.spinner("Generating session summary..."):
         summary = generate_session_summary()
-        # Only save if there's something worth noting
         has_content = (
             summary["holdings_movement"]
             or summary["watchlist_changes"]

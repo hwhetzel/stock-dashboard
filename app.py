@@ -61,8 +61,8 @@ prices = get_bulk_current_prices(tickers)
 def get_day_change(ticker: str) -> dict:
     try:
         info = yf.Ticker(ticker).fast_info
-        current = info.get("last_price")
-        prev = info.get("previous_close")
+        current = info.last_price
+        prev = info.previous_close
         if current and prev and prev > 0:
             change = current - prev
             change_pct = (change / prev) * 100
