@@ -205,8 +205,8 @@ st.divider()
 # ── Since you were gone ───────────────────────────────────────────────────────
 
 with st.container(border=True):
-    st.subheader("Since You Were Gone")
-    st.caption("What changed since your last session.")
+    st.subheader("Today's Market Movements")
+    st.caption("Holdings that moved significantly today vs previous close.")
 
     significant_threshold = float(str(get_setting("notify_price_change_pct", "2.0")))
     moved = []
