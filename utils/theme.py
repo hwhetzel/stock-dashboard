@@ -2,8 +2,19 @@ import streamlit as st
 
 
 def apply_theme():
-    """Theme system disabled — using Streamlit defaults."""
-    pass
+    """Inject minimal card styling for metric containers."""
+    css = """
+    <style>
+        div[data-testid="stMetric"] {
+            border: 1px solid #2d3139;
+            border-radius: 10px;
+            padding: 16px;
+            background-color: #1a1d23;
+            min-height: 140px;
+        }
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
 
 
 def html_table(rows: list[dict], theme: str = "") -> str:
