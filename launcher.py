@@ -7,10 +7,9 @@ import webview
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-PORT    = 8501
-URL     = f"http://localhost:{PORT}"
-APP     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py")
-
+PORT = 8501
+URL = f"http://localhost:{PORT}"
+APP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Home.py")
 
 streamlit_process = None
 
