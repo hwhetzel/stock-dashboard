@@ -1,8 +1,6 @@
 import sqlite3
 import os
 
-# Always resolve the db path relative to this file's location,
-# so the app works regardless of where it's launched from.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "db", "portfolio.db")
 
@@ -11,17 +9,16 @@ def get_connection():
     """Return a sqlite3 connection with foreign keys enforced."""
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.row_factory = sqlite3.Row  # rows behave like dicts
+    conn.row_factory = sqlite3.Row
     return conn
 
 
 def initialize_db():
-    """Create all tables if they don't already exist."""
+    """Create all tables if they don't already exist, and run migrations."""
     conn = get_connection()
     c = conn.cursor()
 
     # --- Transactions ---
-    # One row per buy/sell event. Holdings are calculated from these.
     c.execute("""
         CREATE TABLE IF NOT EXISTS transactions (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,8 +26,10 @@ def initialize_db():
             type        TEXT    NOT NULL CHECK(type IN ('buy','sell')),
             shares      REAL    NOT NULL CHECK(shares > 0),
             price       REAL    NOT NULL CHECK(price > 0),
-            date        TEXT    NOT NULL,  -- stored as YYYY-MM-DD string
-            notes       TEXT
+            date        TEXT    NOT NULL,
+            notes       TEXT,
+            account     TEXT,           -- e.g. "Doug's IRA", "Amy's IRA"
+            source      TEXT    NOT NULL DEFAULT 'manual'  -- 'manual' or 'csv_import'
         )
     """)
 
@@ -39,25 +38,23 @@ def initialize_db():
         CREATE TABLE IF NOT EXISTS watchlist (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker          TEXT    NOT NULL UNIQUE,
-            target_price    REAL,           -- optional alert price
+            target_price    REAL,
             notes           TEXT,
             added_date      TEXT    NOT NULL
         )
     """)
 
     # --- Notifications ---
-    # Each row is a session summary generated on app open or CSV import.
     c.execute("""
         CREATE TABLE IF NOT EXISTS notifications (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at  TEXT    NOT NULL,  -- YYYY-MM-DD HH:MM:SS
-            summary     TEXT    NOT NULL,  -- full summary text (JSON string)
-            read        INTEGER NOT NULL DEFAULT 0  -- 0 = unread, 1 = read
+            created_at  TEXT    NOT NULL,
+            summary     TEXT    NOT NULL,
+            read        INTEGER NOT NULL DEFAULT 0
         )
     """)
 
     # --- Settings ---
-    # Key-value store for all user preferences.
     c.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key     TEXT PRIMARY KEY,
@@ -66,14 +63,28 @@ def initialize_db():
     """)
 
     # --- Screener configs ---
-    # Saves named screener weight profiles so the user can reuse them.
     c.execute("""
         CREATE TABLE IF NOT EXISTS screener_configs (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             name        TEXT    NOT NULL UNIQUE,
-            weights     TEXT    NOT NULL   -- JSON string of weight dict
+            weights     TEXT    NOT NULL
         )
     """)
+
+    conn.commit()
+
+    # ── Migrations: add columns to existing DBs that predate this schema ──────
+    # These are safe to run on a fresh DB too — they only fire if the column
+    # doesn't already exist.
+    existing_cols = [
+        row[1] for row in c.execute("PRAGMA table_info(transactions)").fetchall()
+    ]
+    if "account" not in existing_cols:
+        c.execute("ALTER TABLE transactions ADD COLUMN account TEXT")
+    if "source" not in existing_cols:
+        c.execute(
+            "ALTER TABLE transactions ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"
+        )
 
     conn.commit()
     conn.close()
@@ -81,12 +92,12 @@ def initialize_db():
 
 # ── Transactions ─────────────────────────────────────────────────────────────
 
-def add_transaction(ticker, type_, shares, price, date, notes=""):
+def add_transaction(ticker, type_, shares, price, date, notes="", account=None, source="manual"):
     conn = get_connection()
     conn.execute(
-        """INSERT INTO transactions (ticker, type, shares, price, date, notes)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (ticker.upper(), type_, shares, price, date, notes)
+        """INSERT INTO transactions (ticker, type, shares, price, date, notes, account, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (ticker.upper(), type_, shares, price, date, notes, account, source)
     )
     conn.commit()
     conn.close()
@@ -115,16 +126,34 @@ def delete_transaction(transaction_id):
     conn.close()
 
 
-def update_transaction(transaction_id, ticker, type_, shares, price, date, notes=""):
+def update_transaction(transaction_id, ticker, type_, shares, price, date, notes="", account=None):
     conn = get_connection()
     conn.execute(
         """UPDATE transactions
-           SET ticker=?, type=?, shares=?, price=?, date=?, notes=?
+           SET ticker=?, type=?, shares=?, price=?, date=?, notes=?, account=?
            WHERE id=?""",
-        (ticker.upper(), type_, shares, price, date, notes, transaction_id)
+        (ticker.upper(), type_, shares, price, date, notes, account, transaction_id)
     )
     conn.commit()
     conn.close()
+
+
+def delete_csv_transactions():
+    """Remove all CSV-imported transactions — used before re-importing."""
+    conn = get_connection()
+    conn.execute("DELETE FROM transactions WHERE source = 'csv_import'")
+    conn.commit()
+    conn.close()
+
+
+def get_known_accounts() -> list[str]:
+    """Return distinct non-null account names from all transactions."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT DISTINCT account FROM transactions WHERE account IS NOT NULL ORDER BY account"
+    ).fetchall()
+    conn.close()
+    return [r["account"] for r in rows]
 
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
@@ -196,10 +225,10 @@ def delete_screener_config(name):
     conn.commit()
     conn.close()
 
+
 # ── Notifications ─────────────────────────────────────────────────────────────
 
 def add_notification(summary: dict):
-    """Save a new session summary notification."""
     import json
     from datetime import datetime
     conn = get_connection()
@@ -212,7 +241,6 @@ def add_notification(summary: dict):
 
 
 def get_notifications() -> list[dict]:
-    """Return all notifications newest first."""
     import json
     conn = get_connection()
     rows = conn.execute(
@@ -291,6 +319,7 @@ def set_setting(key: str, value):
     )
     conn.commit()
     conn.close()
+
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
