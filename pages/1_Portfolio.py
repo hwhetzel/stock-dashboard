@@ -136,13 +136,17 @@ show_account_col = (_multi_setting == "true") or (len(_known_accounts) > 1)
 
 # ── CSV Import ────────────────────────────────────────────────────────────────
 
+# Track whether to keep the expander open
+if "csv_expander_open" not in st.session_state:
+    st.session_state.csv_expander_open = False
+
 st.subheader("Import from Ameriprise CSV")
 
-with st.expander("Import Unrealized Gain/Loss CSV", expanded=False):
+with st.expander("Import Unrealized Gain/Loss CSV", expanded=st.session_state.csv_expander_open):
     uploaded_file = st.file_uploader(
         "Upload your Ameriprise Unrealized Gain/Loss CSV",
         type=["csv"],
-        key="csv_upload",
+        key=st.session_state.get("csv_uploader_key", "csv_upload"),
     )
 
     if uploaded_file is not None:
@@ -152,7 +156,6 @@ with st.expander("Import Unrealized Gain/Loss CSV", expanded=False):
             if not positions:
                 st.error("No valid positions found in the file. Check that you uploaded the Unrealized Gain/Loss export.")
             else:
-                # Show preview before confirming
                 preview_df = pd.DataFrame(positions)
                 preview_df = preview_df.rename(columns={
                     "symbol": "Ticker",
@@ -173,9 +176,13 @@ with st.expander("Import Unrealized Gain/Loss CSV", expanded=False):
 
                 if st.button("Confirm Import", type="primary", key="confirm_import"):
                     summary = apply_csv_import(positions)
+
+                    # Close expander and reset uploader on next rerun
+                    st.session_state.csv_expander_open = False
+                    st.session_state.csv_uploader_key = f"csv_upload_{summary['date']}_{summary['total_positions']}"
+
                     st.success(f"Imported {summary['total_positions']} positions.")
 
-                    # Show change summary
                     if summary["added"]:
                         st.info(f"**New positions:** {', '.join(summary['added'])}")
                     if summary["removed"]:
@@ -203,6 +210,9 @@ with st.expander("Import Unrealized Gain/Loss CSV", expanded=False):
             st.error(str(e))
         except Exception as e:
             st.error(f"Failed to parse CSV: {e}")
+    else:
+        # Reset expander open state when no file is uploaded
+        st.session_state.csv_expander_open = False
 
 # ── Holdings table ────────────────────────────────────────────────────────────
 
