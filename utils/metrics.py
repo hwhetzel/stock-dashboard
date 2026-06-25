@@ -20,34 +20,38 @@ def calculate_total_return(price_series: pd.Series) -> float:
 
 
 def calculate_annualized_return(price_series: pd.Series) -> float:
-    """
-    Annualized return % using CAGR formula.
-    Assumes daily price data with ~252 trading days/year.
-    """
     if price_series.empty or len(price_series) < 2:
         return 0.0
-    total_return = (price_series.iloc[-1] / price_series.iloc[0])
+    start = price_series.iloc[0]
+    end = price_series.iloc[-1]
+    if start <= 0 or end <= 0:
+        return 0.0
+    total_return = end / start
     num_days = (price_series.index[-1] - price_series.index[0]).days
-    if num_days <= 0 or total_return <= 0:
+    if num_days < 2:
         return 0.0
     years = num_days / 365.25
-    cagr = (total_return ** (1 / years) - 1) * 100
+    try:
+        cagr = (total_return ** (1 / years) - 1) * 100
+    except (ZeroDivisionError, OverflowError, ValueError):
+        return 0.0
+    # Guard against inf or nan
+    if not np.isfinite(cagr):
+        return 0.0
     return cagr
 
 
 def calculate_sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.04) -> float:
-    """
-    Annualized Sharpe Ratio.
-    risk_free_rate is annual (default 4%, roughly current T-bill rate —
-    update this manually if you want a more precise figure).
-    Formula: (mean daily return - daily risk-free) / std daily return, annualized.
-    """
-    if returns.empty or returns.std() == 0:
+    if returns.empty or len(returns) < 2:
         return 0.0
-
+    std = returns.std()
+    if std == 0 or not np.isfinite(std):
+        return 0.0
     daily_rf = risk_free_rate / 252
     excess_returns = returns - daily_rf
-    sharpe = (excess_returns.mean() / returns.std()) * np.sqrt(252)
+    sharpe = (excess_returns.mean() / std) * np.sqrt(252)
+    if not np.isfinite(sharpe):
+        return 0.0
     return sharpe
 
 
@@ -81,32 +85,27 @@ def calculate_portfolio_value_over_time(
     transactions: list[dict],
     price_history: dict[str, pd.Series],
 ) -> pd.Series:
-    """
-    Reconstruct total portfolio market value for each date in the price history.
-
-    transactions   : list of transaction dicts (ticker, type, shares, price, date)
-    price_history  : {ticker: pd.Series of close prices indexed by date}
-
-    Returns a pd.Series indexed by date -> total portfolio value.
-    Used for benchmark comparison and total return over time.
-    """
     if not transactions or not price_history:
         return pd.Series(dtype=float)
 
-    # Build a unified date index across all price series
     all_dates = sorted(set().union(*[s.index for s in price_history.values()]))
     if not all_dates:
         return pd.Series(dtype=float)
 
-    # Sort transactions chronologically
     sorted_tx = sorted(transactions, key=lambda x: x["date"])
+
+    # Only start from the earliest transaction date so we don't get
+    # a fake 0 → value jump that destroys return calculations
+    earliest_tx_date = pd.Timestamp(sorted_tx[0]["date"]).tz_localize(None).normalize()
+    all_dates = [d for d in all_dates if pd.Timestamp(d).tz_localize(None).normalize() >= earliest_tx_date]
+
+    if not all_dates:
+        return pd.Series(dtype=float)
 
     portfolio_values = []
     for current_date in all_dates:
-        # Strip timezone from current_date so it's always tz-naive for comparison
         current_date_only = pd.Timestamp(current_date).tz_localize(None).normalize()
 
-        # Compute shares held per ticker as of this date
         shares_as_of = {}
         for tx in sorted_tx:
             tx_date = pd.Timestamp(tx["date"]).tz_localize(None).normalize()
@@ -119,20 +118,23 @@ def calculate_portfolio_value_over_time(
             elif tx["type"] == "sell":
                 shares_as_of[ticker] -= tx["shares"]
 
-        # Sum market value across tickers using closest available price
         total_value = 0.0
         for ticker, shares in shares_as_of.items():
             if shares <= 0 or ticker not in price_history:
                 continue
             series = price_history[ticker]
-            # Use the most recent price at or before current_date
             valid_prices = series[series.index <= current_date]
             if not valid_prices.empty:
                 total_value += shares * valid_prices.iloc[-1]
 
         portfolio_values.append(total_value)
 
-    return pd.Series(portfolio_values, index=pd.to_datetime(all_dates))
+    result = pd.Series(portfolio_values, index=pd.to_datetime(all_dates))
+
+    # Drop leading zeros — any period before first real position was held
+    result = result[result > 0]
+
+    return result
 
 
 def normalize_to_100(series: pd.Series) -> pd.Series:
