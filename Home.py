@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 import yfinance as yf
 import pandas as pd
-from database import initialize_db, get_transactions, get_setting
+from database import initialize_db, get_transactions, get_setting, get_known_accounts
 from data import get_bulk_current_prices, get_news, get_earnings_dates
 from utils.theme import apply_theme
 
@@ -11,6 +11,17 @@ from utils.theme import apply_theme
 st.set_page_config(page_title="Stock Dashboard", page_icon="📈", layout="wide")
 initialize_db()
 apply_theme()
+
+# ── Weekly CSV reminder banner ────────────────────────────────────────────────
+
+last_import = get_setting("last_csv_import", None)
+if last_import and get_setting("csv_weekly_reminder", "0") == "1":
+    try:
+        last_dt = datetime.strptime(last_import, "%Y-%m-%d")
+        if datetime.now() - last_dt >= timedelta(days=7):
+            st.warning(f"⏰ It's been 7+ days since your last CSV import ({last_import}). Consider importing a fresh export on the Portfolio page.")
+    except ValueError:
+        pass
 
 # ── Holdings builder ──────────────────────────────────────────────────────────
 
@@ -23,7 +34,10 @@ def compute_holdings(transactions):
     for ticker, txs in by_ticker.items():
         shares_held = 0.0
         cost_basis = 0.0
+        accounts = set()
         for tx in txs:
+            if tx.get("account"):
+                accounts.add(tx["account"])
             if tx["type"] == "buy":
                 cost_basis += tx["shares"] * tx["price"]
                 shares_held += tx["shares"]
@@ -37,6 +51,7 @@ def compute_holdings(transactions):
                 "ticker": ticker,
                 "shares": shares_held,
                 "cost_basis": cost_basis,
+                "accounts": ", ".join(sorted(accounts)) if accounts else "",
             })
     return holdings
 
@@ -98,7 +113,7 @@ total_unrealized = total_value - total_cost
 total_unrealized_pct = (total_unrealized / total_cost * 100) if total_cost else 0
 total_day_change_pct = (total_day_change / (total_value - total_day_change) * 100) if (total_value - total_day_change) else 0
 
-# ── Portfolio summary ─────────────────────────────────────────────────────────
+# ── Portfolio summary cards ───────────────────────────────────────────────────
 
 st.subheader("Portfolio Summary")
 row1_c1, row1_c2, row1_c3 = st.columns(3)
@@ -129,6 +144,12 @@ st.divider()
 
 snap_col, news_col = st.columns([3, 2])
 
+# Determine if Account column should show
+show_account_col = (
+    get_setting("has_multiple_accounts", "false") == "true"
+    or len(get_known_accounts()) > 1
+)
+
 with snap_col:
     st.subheader("Holdings Snapshot")
     snap_rows = []
@@ -139,13 +160,14 @@ with snap_col:
         unreal = (mkt_val - h["cost_basis"]) if mkt_val else None
         unreal_pct = (unreal / h["cost_basis"] * 100) if unreal and h["cost_basis"] else None
         d = day_data.get(ticker, {})
-        snap_rows.append({
-            "Ticker": ticker,
-            "Price": f"${price:,.2f}" if price else "N/A",
-            "Value": f"${mkt_val:,.2f}" if mkt_val else "N/A",
-            "Day %": f"{d['change_pct']:+.2f}%" if d.get("change_pct") is not None else "N/A",
-            "Total G/L %": f"{unreal_pct:+.2f}%" if unreal_pct is not None else "N/A",
-        })
+        row = {"Ticker": ticker}
+        if show_account_col:
+            row["Account"] = h.get("accounts", "")
+        row["Price"] = f"${price:,.2f}" if price else "N/A"
+        row["Value"] = f"${mkt_val:,.2f}" if mkt_val else "N/A"
+        row["Day %"] = f"{d['change_pct']:+.2f}%" if d.get("change_pct") is not None else "N/A"
+        row["Total G/L %"] = f"{unreal_pct:+.2f}%" if unreal_pct is not None else "N/A"
+        snap_rows.append(row)
     st.dataframe(snap_rows, use_container_width=True, hide_index=True)
 
 with news_col:
@@ -198,11 +220,11 @@ with news_col:
                 )
             st.markdown("".join(html_lines), unsafe_allow_html=True)
             st.markdown("<br>", unsafe_allow_html=True)
-            st.page_link("pages/9_news.py", label="View all news →")
+            st.page_link("pages/9_News.py", label="View all news →")
 
 st.divider()
 
-# ── Since you were gone ───────────────────────────────────────────────────────
+# ── Today's market movements ──────────────────────────────────────────────────
 
 with st.container(border=True):
     st.subheader("Today's Market Movements")
@@ -254,14 +276,17 @@ st.divider()
 
 with st.container(border=True):
     st.subheader("Quick Links")
-    ql1, ql2, ql3, ql4 = st.columns(4)
-    ql1.page_link("pages/1_Portfolio.py",  label="Portfolio",  icon="💼")
-    ql2.page_link("pages/2_Allocation.py", label="Allocation", icon="🥧")
-    ql3.page_link("pages/4_Dividends.py",  label="Dividends",  icon="💰")
-    ql4.page_link("pages/5_Analytics.py",  label="Analytics",  icon="📊")
+    ql1, ql2, ql3, ql4, ql5, ql6 = st.columns(6)
+    ql1.page_link("pages/1_Portfolio.py",       label="Portfolio",      icon="💼")
+    ql2.page_link("pages/2_Allocation.py",      label="Allocation",     icon="🥧")
+    ql3.page_link("pages/3_Watchlist.py",       label="Watchlist",      icon="👀")
+    ql4.page_link("pages/4_Dividends.py",       label="Dividends",      icon="💰")
+    ql5.page_link("pages/5_Analytics.py",       label="Analytics",      icon="📊")
+    ql6.page_link("pages/6_Charts.py",          label="Charts",         icon="📉")
 
-    ql5, ql6, ql7, ql8 = st.columns(4)
-    ql5.page_link("pages/3_Watchlist.py",  label="Watchlist",  icon="👀")
-    ql6.page_link("pages/6_Charts.py",     label="Charts",     icon="📉")
-    ql7.page_link("pages/7_Earnings.py",   label="Earnings",   icon="📅")
-    ql8.page_link("pages/8_Screener.py",   label="Screener",   icon="🔍")
+    ql7, ql8, ql9, ql10, ql11, _ = st.columns(6)
+    ql7.page_link("pages/7_Earnings.py",        label="Earnings",       icon="📅")
+    ql8.page_link("pages/8_Screener.py",        label="Screener",       icon="🔍")
+    ql9.page_link("pages/9_News.py",            label="News",           icon="📰")
+    ql10.page_link("pages/10_Notifications.py", label="Notifications",  icon="🔔")
+    ql11.page_link("pages/11_Settings.py",      label="Settings",       icon="⚙️")
