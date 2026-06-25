@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from database import initialize_db, get_transactions
+from database import initialize_db, get_transactions, get_setting, get_known_accounts
 from data import get_price_history, get_bulk_current_prices
 from utils.metrics import (
     calculate_returns,
@@ -33,7 +33,10 @@ def compute_holdings(transactions):
     for ticker, txs in by_ticker.items():
         shares_held = 0.0
         cost_basis = 0.0
+        accounts = set()
         for tx in txs:
+            if tx.get("account"):
+                accounts.add(tx["account"])
             if tx["type"] == "buy":
                 cost_basis += tx["shares"] * tx["price"]
                 shares_held += tx["shares"]
@@ -43,8 +46,12 @@ def compute_holdings(transactions):
                 cost_basis -= sell * avg
                 shares_held -= sell
         if shares_held > 0.0001:
-            holdings.append({"ticker": ticker, "shares": shares_held, "cost_basis": cost_basis})
-
+            holdings.append({
+                "ticker": ticker,
+                "shares": shares_held,
+                "cost_basis": cost_basis,
+                "accounts": ", ".join(sorted(accounts)) if accounts else "",
+            })
     return holdings
 
 
@@ -106,7 +113,7 @@ if portfolio_value_series.empty:
 total_return = calculate_total_return(portfolio_value_series)
 annualized_return = calculate_annualized_return(portfolio_value_series)
 returns = calculate_returns(portfolio_value_series)
-from database import get_setting
+
 rf_rate = float(str(get_setting("sharpe_rf_rate", "4.0"))) / 100
 sharpe = calculate_sharpe_ratio(returns, risk_free_rate=rf_rate)
 
@@ -167,11 +174,23 @@ st.divider()
 
 st.subheader("Best & Worst Performers")
 
+# Determine if Account column should show
+show_account_col = (
+    get_setting("has_multiple_accounts", "false") == "true"
+    or len(get_known_accounts()) > 1
+)
+
+# Build account lookup from holdings
+account_map = {h["ticker"]: h.get("accounts", "") for h in holdings}
+
 performance_rows = []
 for t in tickers:
     if t in price_history and not price_history[t].empty:
         ret = calculate_total_return(price_history[t])
-        performance_rows.append({"Ticker": t, "Return %": round(ret, 2)})
+        row = {"Ticker": t, "Return %": round(ret, 2)}
+        if show_account_col:
+            row["Account"] = account_map.get(t, "")
+        performance_rows.append(row)
 
 if performance_rows:
     perf_df = pd.DataFrame(performance_rows).sort_values("Return %", ascending=False)
@@ -192,9 +211,10 @@ if performance_rows:
         color="Return %", color_continuous_scale="RdYlGn",
         title=f"Return by Holding ({selected_label})",
     )
-    fig_bar.update_layout(margin=dict(
-        t=40, b=0, l=0, r=0), 
-        coloraxis_showscale=False, 
-        paper_bgcolor="rgba(0,0,0,0)", 
-        plot_bgcolor="rgba(0,0,0,0)")
+    fig_bar.update_layout(
+        margin=dict(t=40, b=0, l=0, r=0),
+        coloraxis_showscale=False,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
     st.plotly_chart(fig_bar, use_container_width=True)
