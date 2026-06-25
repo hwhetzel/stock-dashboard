@@ -1,7 +1,10 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
-from database import initialize_db, get_watchlist, add_to_watchlist, remove_from_watchlist, update_watchlist_item, add_transaction
+from database import (
+    initialize_db, get_watchlist, add_to_watchlist, remove_from_watchlist,
+    update_watchlist_item, add_transaction, get_known_accounts, get_setting,
+)
 from data import get_bulk_current_prices, get_ticker_info, get_price_history, get_52_week_range, is_valid_ticker
 from utils.indicators import compute_rsi, compute_macd, compute_moving_averages
 
@@ -23,7 +26,6 @@ def get_signals(ticker: str) -> list[dict]:
     Each dict has: { label, flag, reason }
     flag is one of: "bullish", "bearish", "neutral"
     """
-    from database import get_setting
     rsi_overbought = int(str(get_setting("notify_rsi_overbought", "70")))
     rsi_oversold = int(str(get_setting("notify_rsi_oversold", "30")))
     signals = []
@@ -37,7 +39,7 @@ def get_signals(ticker: str) -> list[dict]:
     # ── MA crossover (50 vs 200 day) ─────────────────────────────────────────
     mas = compute_moving_averages(close, windows=[50, 200])
     if "MA_50" in mas.columns and "MA_200" in mas.columns:
-        ma50  = mas["MA_50"].iloc[-1]
+        ma50 = mas["MA_50"].iloc[-1]
         ma200 = mas["MA_200"].iloc[-1]
         if pd.notna(ma50) and pd.notna(ma200):
             if ma50 > ma200:
@@ -81,7 +83,7 @@ def get_signals(ticker: str) -> list[dict]:
     week52 = get_52_week_range(ticker)
     current_price = close.iloc[-1]
     high52 = week52.get("high")
-    low52  = week52.get("low")
+    low52 = week52.get("low")
 
     if high52 and current_price >= high52 * 0.95:
         signals.append({
@@ -110,6 +112,8 @@ FLAG_COLORS = {
 watchlist = get_watchlist()
 tickers = [w["ticker"] for w in watchlist]
 prices = get_bulk_current_prices(tickers) if tickers else {}
+known_accounts = get_known_accounts()
+account_options = ["(none)"] + known_accounts
 
 # ── Watchlist table ───────────────────────────────────────────────────────────
 
@@ -119,9 +123,9 @@ else:
     st.subheader("Watchlist")
 
     for item in watchlist:
-        ticker  = item["ticker"]
+        ticker = item["ticker"]
         target_price = item["target_price"]
-        current  = prices.get(ticker)
+        current = prices.get(ticker)
 
         with st.expander(
             f"**{ticker}** — "
@@ -144,14 +148,12 @@ else:
                 if item["notes"]:
                     st.caption(f"Notes: {item['notes']}")
 
-                # Technical signals — only load when expander is open
+                # Technical signals
                 st.markdown("**Technical Signals**")
                 load_signals = st.button("Load Signals", key=f"load_{ticker}")
                 if load_signals:
                     with st.spinner("Analysing signals..."):
                         signals = get_signals(ticker)
-
-                if load_signals:
                     if not signals:
                         st.caption("No signals available.")
                     else:
@@ -162,16 +164,55 @@ else:
             with col2:
                 st.markdown("**Actions**")
 
-                # Move to portfolio
+                # ── Move to portfolio ─────────────────────────────────────────
                 st.caption("Move to Portfolio")
-                mv_shares = st.number_input("Shares", min_value=0.001, step=0.01, format="%.4f", key=f"mv_shares_{ticker}")
-                mv_price  = st.number_input("Price",  min_value=0.01,  step=0.01, format="%.2f",
-                                            value=float(current) if current else 1.0, key=f"mv_price_{ticker}")
-                mv_date   = st.date_input("Date", value=date.today(), key=f"mv_date_{ticker}")
+
+                mv_shares = st.number_input(
+                    "Shares", min_value=0.001, step=0.01, format="%.4f",
+                    key=f"mv_shares_{ticker}",
+                )
+
+                # Price field — pre-filled with current price from yfinance
+                # "Fetch Price" button refreshes it from yfinance on demand
+                default_price = float(current) if current else 1.0
+                if st.button("Fetch current price", key=f"fetch_price_{ticker}"):
+                    import yfinance as yf
+                    try:
+                        fetched = yf.Ticker(ticker).fast_info.last_price
+                        if fetched:
+                            st.session_state[f"mv_price_{ticker}"] = round(float(fetched), 2)
+                            st.rerun()
+                    except Exception:
+                        st.warning("Could not fetch price. Enter manually.")
+
+                mv_price = st.number_input(
+                    "Price per Share",
+                    min_value=0.01, step=0.01, format="%.2f",
+                    value=st.session_state.get(f"mv_price_{ticker}", default_price),
+                    key=f"mv_price_{ticker}",
+                )
+
+                mv_date = st.date_input("Date", value=date.today(), key=f"mv_date_{ticker}")
+
+                # Account dropdown — pulls known accounts from DB
+                mv_acct_select = st.selectbox(
+                    "Account (optional)", account_options,
+                    key=f"mv_acct_{ticker}",
+                )
+                mv_acct_custom = st.text_input(
+                    "Or type new account name",
+                    placeholder="e.g. Roth IRA",
+                    key=f"mv_acct_custom_{ticker}",
+                )
+
                 if st.button("Add as Buy", key=f"buy_{ticker}"):
                     if mv_shares <= 0.001:
                         st.error("Enter a share amount greater than 0.001.")
                     else:
+                        # Custom account name takes priority over dropdown
+                        account_val = mv_acct_custom.strip() if mv_acct_custom.strip() else (
+                            mv_acct_select if mv_acct_select != "(none)" else None
+                        )
                         add_transaction(
                             ticker=ticker,
                             type_="buy",
@@ -179,6 +220,8 @@ else:
                             price=mv_price,
                             date=mv_date.strftime("%Y-%m-%d"),
                             notes="Added from watchlist",
+                            account=account_val,
+                            source="manual",
                         )
                         remove_from_watchlist(ticker)
                         st.success(f"{ticker} moved to portfolio.")
@@ -186,7 +229,7 @@ else:
 
                 st.divider()
 
-                # Edit target / notes
+                # ── Edit target / notes ───────────────────────────────────────
                 st.caption("Edit")
                 new_target = st.number_input(
                     "Target Price",
@@ -203,7 +246,7 @@ else:
 
                 st.divider()
 
-                # Remove
+                # ── Remove ────────────────────────────────────────────────────
                 if st.button("🗑 Remove", key=f"remove_{ticker}", type="primary"):
                     remove_from_watchlist(ticker)
                     st.rerun()
@@ -218,7 +261,7 @@ with st.form("add_watchlist_form", clear_on_submit=True):
     col1, col2, col3 = st.columns([2, 1.5, 3])
     new_ticker = col1.text_input("Ticker", placeholder="e.g. TSLA").upper().strip()
     new_target = col2.number_input("Target Price (optional)", min_value=0.0, step=0.01, format="%.2f")
-    new_notes  = col3.text_input("Notes (optional)", placeholder="e.g. watching for breakout")
+    new_notes = col3.text_input("Notes (optional)", placeholder="e.g. watching for breakout")
 
     if st.form_submit_button("Add to Watchlist"):
         if not new_ticker:

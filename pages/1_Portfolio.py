@@ -21,6 +21,15 @@ initialize_db()
 from utils.theme import apply_theme
 apply_theme()
 
+# Only reset on true page load, not on reruns (e.g. fetch button)
+if not st.session_state.get("portfolio_loaded"):
+    for key in [k for k in list(st.session_state.keys()) if isinstance(k, str) and k.startswith("edit_tx_fetch_msg_")]:
+        del st.session_state[key]
+    st.session_state.pop("add_tx_fetch_msg", None)
+    st.session_state.pop("add_tx_ticker", None)
+    st.session_state.pop("add_tx_price", None)  # clear widget key so it resets to default
+    st.session_state["portfolio_loaded"] = True
+
 st.title("Portfolio")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -266,28 +275,73 @@ if not holdings.empty:
             tx_df["Price"] = tx_df["Price"].map("${:.2f}".format)
         st.dataframe(tx_df, use_container_width=True, hide_index=True)
 
-# ── Add transaction form ──────────────────────────────────────────────────────
+# ── Add Transaction ───────────────────────────────────────────────────────────
 
 st.divider()
 st.subheader("Add Transaction")
 
-# Build account options: known accounts from DB + blank option
 known_accounts = get_known_accounts()
 account_options = ["(none)"] + known_accounts
+
+if "add_tx_price" not in st.session_state:
+    st.session_state["add_tx_price"] = 1.0
+if "add_tx_ticker" not in st.session_state:
+    st.session_state["add_tx_ticker"] = ""
+
+add_row1_col1, add_row1_col2 = st.columns([2, 4])
+add_ticker_fetch = (add_row1_col1.text_input(
+    "Ticker", placeholder="e.g. AAPL", key="add_ticker_fetch_input",
+    value=st.session_state["add_tx_ticker"],
+) or "").upper().strip()
+
+add_row1_col2.write("")
+add_row1_col2.write("")
+if add_row1_col2.button("Fetch current price", key="fetch_price_add"):
+    if add_ticker_fetch:
+        import yfinance as yf
+        try:
+            fetched = yf.Ticker(add_ticker_fetch).fast_info.last_price
+            if fetched:
+                st.session_state["add_tx_price"] = round(float(fetched), 2)
+                st.session_state["add_tx_ticker"] = add_ticker_fetch
+                st.session_state["add_tx_fetch_msg"] = f"Fetched ${round(float(fetched), 2)} for {add_ticker_fetch}"
+            else:
+                st.session_state["add_tx_fetch_msg"] = "Could not fetch price. Enter manually."
+        except Exception:
+            st.session_state["add_tx_fetch_msg"] = "Could not fetch price. Enter manually."
+    else:
+        st.session_state["add_tx_fetch_msg"] = "Enter a ticker first."
+    st.rerun()
+
+if st.session_state.get("add_tx_fetch_msg"):
+    st.success(st.session_state["add_tx_fetch_msg"])
 
 with st.form("add_tx_form", clear_on_submit=True):
     col1, col2, col3, col4, col5 = st.columns([2, 1.5, 1.5, 1.5, 2])
 
-    ticker_input = col1.text_input("Ticker", placeholder="e.g. AAPL").upper().strip()
+    ticker_input = (col1.text_input(
+        "Confirm Ticker",
+        value=st.session_state["add_tx_ticker"],
+        placeholder="e.g. AAPL",
+    ) or "").upper().strip()
     tx_type = col2.selectbox("Type", ["buy", "sell"])
     shares_input = col3.number_input("Shares", min_value=0.001, step=0.01, format="%.4f")
-    price_input = col4.number_input("Price per Share", min_value=0.01, step=0.01, format="%.2f")
+
+    # Use key= tied to session state so the value updates immediately on rerun
+    if "add_tx_price" not in st.session_state:
+        st.session_state["add_tx_price"] = 1.0
+
+    col4.number_input(
+        "Price per Share", min_value=0.01, step=0.01, format="%.2f",
+        key="add_tx_price",
+    )
+    price_input = st.session_state["add_tx_price"]
+
     date_input = col5.date_input("Date", value=date.today())
 
     acct_col, notes_col = st.columns([1, 2])
-    # Dropdown shows known accounts; user can also type a new one below
     acct_select = acct_col.selectbox("Account (optional)", account_options)
-    acct_custom = acct_col.text_input("Or type New Account Name", placeholder="e.g. Roth IRA")
+    acct_custom = acct_col.text_input("Or type new account name", placeholder="e.g. Roth IRA")
     notes_input = notes_col.text_input("Notes (optional)", placeholder="e.g. dividend reinvestment")
 
     submitted = st.form_submit_button("Add Transaction")
@@ -295,7 +349,6 @@ with st.form("add_tx_form", clear_on_submit=True):
         if not ticker_input:
             st.error("Ticker is required.")
         else:
-            # Custom account name takes priority over dropdown selection
             account_val = acct_custom.strip() if acct_custom.strip() else (
                 acct_select if acct_select != "(none)" else None
             )
@@ -310,9 +363,13 @@ with st.form("add_tx_form", clear_on_submit=True):
                 source="manual",
             )
             st.success(f"Added {tx_type} of {shares_input} shares of {ticker_input}.")
+            st.session_state.pop("add_tx_fetch_msg", None)
+            st.session_state.pop("add_tx_price", None)
+            st.session_state["add_tx_ticker"] = ""
             st.rerun()
+            st.session_state["portfolio_loaded"] = False
 
-# ── Edit / delete transaction ─────────────────────────────────────────────────
+# ── Edit / Delete a Transaction ───────────────────────────────────────────────
 
 st.divider()
 st.subheader("Edit / Delete a Transaction")
@@ -321,7 +378,6 @@ if not all_transactions:
     st.info("No transactions to edit yet.")
 else:
     tx_df_all = pd.DataFrame(all_transactions)
-
     tx_df_all["label"] = tx_df_all.apply(
         lambda r: f"[{r['id']}] {r['date']} — {r['type'].upper()} "
                   f"{r['shares']} {r['ticker']} @ ${r['price']:.2f}",
@@ -332,33 +388,80 @@ else:
     selected_row = tx_df_all[tx_df_all["label"] == selected_label].iloc[0]
     tx_id = int(selected_row["id"])
 
+    # When selected transaction changes, reset everything for that tx
+    if st.session_state.get("edit_last_tx_id") != tx_id:
+        st.session_state.pop(f"edit_tx_price_{tx_id}", None)
+        st.session_state.pop(f"edit_tx_fetch_msg_{tx_id}", None)
+        # Force the ticker text input to the new transaction's ticker
+        st.session_state["fetch_ticker_edit"] = selected_row["ticker"]
+        st.session_state["edit_last_tx_id"] = tx_id
+
+    edit_price_key = f"edit_tx_price_{tx_id}"
+    if edit_price_key not in st.session_state:
+        st.session_state[edit_price_key] = float(selected_row["price"])
+
+    edit_col1, edit_col2 = st.columns([2, 4])
+
+    edit_fetch_ticker = (edit_col1.text_input(
+        "Ticker",
+        key="fetch_ticker_edit",
+    ) or "").upper().strip()
+
+    # Align button with text input
+    edit_col2.write("")
+    edit_col2.write("")
+    if edit_col2.button("Fetch current price", key="fetch_price_edit"):
+        if edit_fetch_ticker:
+            import yfinance as yf
+            try:
+                fetched = yf.Ticker(edit_fetch_ticker).fast_info.last_price
+                if fetched:
+                    st.session_state[edit_price_key] = round(float(fetched), 2)
+                    st.session_state[f"edit_tx_fetch_msg_{tx_id}"] = f"Fetched ${st.session_state[edit_price_key]} for {edit_fetch_ticker}"
+                else:
+                    st.session_state[f"edit_tx_fetch_msg_{tx_id}"] = "Could not fetch price. Enter manually."
+            except Exception:
+                st.session_state[f"edit_tx_fetch_msg_{tx_id}"] = "Could not fetch price. Enter manually."
+        else:
+            st.session_state[f"edit_tx_fetch_msg_{tx_id}"] = "Enter a ticker to fetch its price."
+        st.rerun()
+
+    if st.session_state.get(f"edit_tx_fetch_msg_{tx_id}"):
+        st.success(st.session_state[f"edit_tx_fetch_msg_{tx_id}"])
+
+    current_account = selected_row.get("account", "") or ""
+    safe_account = str(current_account) if current_account and not pd.isna(current_account) else ""
+    safe_account = "" if safe_account.lower() in ("none", "nan") else safe_account
+
     with st.form("edit_tx_form"):
         col1, col2, col3, col4, col5 = st.columns([2, 1.5, 1.5, 1.5, 2])
 
-        e_ticker = col1.text_input("Ticker", value=selected_row["ticker"])
+        e_ticker = (col1.text_input("Confirm Ticker", value=selected_row["ticker"]) or "").upper().strip()
         e_type = col2.selectbox(
             "Type", ["buy", "sell"],
-            index=0 if selected_row["type"] == "buy" else 1
+            index=0 if selected_row["type"] == "buy" else 1,
         )
         e_shares = col3.number_input(
             "Shares", min_value=0.0001, value=float(selected_row["shares"]),
-            step=0.01, format="%.4f"
+            step=0.01, format="%.4f",
         )
-        e_price = col4.number_input(
-            "Price", min_value=0.01, value=float(selected_row["price"]),
-            step=0.01, format="%.2f"
+        col4.number_input(
+            "Price", min_value=0.01, step=0.01, format="%.2f",
+            key=edit_price_key,
         )
+        e_price = st.session_state[edit_price_key]
         e_date = col5.date_input(
             "Date", value=pd.to_datetime(selected_row["date"]).date()
         )
 
-        # Account field on edit form
-        current_account = selected_row.get("account", "") or ""
-        edit_acct_options = ["(none)"] + known_accounts
-        edit_acct_idx = edit_acct_options.index(current_account) if current_account in edit_acct_options else 0
         e_acct_col, e_notes_col = st.columns([1, 2])
+        edit_acct_options = ["(none)"] + known_accounts
+        edit_acct_idx = edit_acct_options.index(safe_account) if safe_account in edit_acct_options else 0
         e_account_select = e_acct_col.selectbox("Account", edit_acct_options, index=edit_acct_idx)
-        e_account_custom = e_acct_col.text_input("Or type New Account Name", value="" if current_account in edit_acct_options else current_account)
+        e_account_custom = e_acct_col.text_input(
+            "Or type new account",
+            value="" if safe_account in edit_acct_options else safe_account,
+        )
         e_notes = e_notes_col.text_input("Notes", value=selected_row["notes"] or "")
 
         edit_col, del_col = st.columns([1, 1])
@@ -370,13 +473,21 @@ else:
                 e_account_select if e_account_select != "(none)" else None
             )
             update_transaction(
-                tx_id, (e_ticker or "").upper().strip(), e_type,
+                tx_id, e_ticker, e_type,
                 e_shares, e_price, e_date.strftime("%Y-%m-%d"), e_notes, account_val
             )
+            st.session_state.pop(edit_price_key, None)
+            st.session_state.pop(f"edit_tx_fetch_msg_{tx_id}", None)
+            st.session_state.pop("fetch_ticker_edit", None)
+            st.session_state["portfolio_loaded"] = False
             st.success("Transaction updated.")
             st.rerun()
 
         if delete_btn:
             delete_transaction(tx_id)
+            st.session_state.pop(edit_price_key, None)
+            st.session_state.pop(f"edit_tx_fetch_msg_{tx_id}", None)
+            st.session_state.pop("fetch_ticker_edit", None)
+            st.session_state["portfolio_loaded"] = False
             st.success("Transaction deleted.")
             st.rerun()
