@@ -155,6 +155,21 @@ if st.button("Save Portfolio Settings"):
 
 st.divider()
 
+# ── News Articles Settings ──────────────────────────────────────────────────────────────
+
+
+st.subheader("News")
+news_per_ticker = st.number_input(
+    "Articles per ticker on News page",
+    min_value=1, max_value=20,
+    value=int(str(get_setting("news_articles_per_ticker", "8"))),
+    step=1,
+)
+if st.button("Save News Settings"):
+    set_setting("news_articles_per_ticker", str(news_per_ticker))
+    st.success("News settings saved.")
+st.divider()
+
 # ── CSV import info ───────────────────────────────────────────────────────────
 
 st.subheader("CSV Import")

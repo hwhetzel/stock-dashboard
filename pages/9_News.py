@@ -3,6 +3,7 @@ import webbrowser
 from datetime import datetime
 from database import initialize_db, get_transactions, get_watchlist
 from data import get_news, get_bulk_current_prices
+from database import initialize_db, get_setting, set_setting
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -13,6 +14,19 @@ from utils.theme import apply_theme
 apply_theme()
 
 st.title("News")
+
+col_slider, col_btn, _ = st.columns([1, 1, 2])
+articles_per_ticker = col_slider.number_input(
+    "Articles per ticker",
+    min_value=1, max_value=20,
+    value=int(str(get_setting("news_articles_per_ticker", "8"))),
+    step=1,
+)
+col_btn.write("")
+col_btn.write("")
+if col_btn.button("Save as default"):
+    set_setting("news_articles_per_ticker", str(articles_per_ticker))
+    st.success("Saved as default.")
 
 # ── Build ticker list from holdings + watchlist ───────────────────────────────
 
@@ -87,12 +101,14 @@ st.divider()
 
 # ── News feed ─────────────────────────────────────────────────────────────────
 
-ARTICLES_PER_TICKER = 10   # cap per ticker to avoid overwhelming the feed
+# cap per ticker to avoid overwhelming the feed
+#ARTICLES_PER_TICKER = int(str(get_setting("news_articles_per_ticker", "8")))
+   
 
 all_articles = []
 
 for ticker in tickers_to_show:
-    articles = get_news(ticker, limit=ARTICLES_PER_TICKER)
+    articles = get_news(ticker, limit=articles_per_ticker)
     badge_color = get_badge_color(ticker)
     for article in articles:
         all_articles.append({
@@ -143,4 +159,4 @@ for article in all_articles:
     )
 
 st.divider()
-st.caption(f"Showing up to {ARTICLES_PER_TICKER} articles per ticker. Links open in your default browser.")
+st.caption(f"Showing up to {articles_per_ticker} articles per ticker. Links open in your default browser.")
