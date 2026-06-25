@@ -6,3 +6,4 @@ plotly
 pywebview
 lxml
 windows-curses
+plyer

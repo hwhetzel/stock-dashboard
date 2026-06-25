@@ -87,6 +87,15 @@ notify_watchlist = tog2.toggle("Watchlist changes", value=s("notify_watchlist", 
 notify_earnings = tog3.toggle("Earnings alerts", value=s("notify_earnings", "1") == "1")
 notify_dividends = tog4.toggle("Dividend alerts", value=s("notify_dividends", "1") == "1")
 
+st.markdown("**Delivery method**")
+notify_delivery = st.radio(
+    "How to deliver notifications",
+    options=["app", "desktop"],
+    format_func=lambda x: "In-app only" if x == "app" else "In-app + desktop popup",
+    index=0 if s("notify_delivery", "app") == "app" else 1,
+    horizontal=True,
+)
+
 if st.button("Save Notification Settings"):
     set_setting("notify_price_change_pct", str(price_change_pct))
     set_setting("notify_watchlist_change_pct", str(watchlist_change_pct))
@@ -98,6 +107,7 @@ if st.button("Save Notification Settings"):
     set_setting("notify_watchlist", "1" if notify_watchlist else "0")
     set_setting("notify_earnings", "1" if notify_earnings else "0")
     set_setting("notify_dividends", "1" if notify_dividends else "0")
+    set_setting("notify_delivery", notify_delivery)
     st.success("Notification settings saved.")
 
 st.divider()

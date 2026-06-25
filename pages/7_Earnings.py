@@ -90,8 +90,10 @@ week_end = now + timedelta(days=7)
 this_week = upcoming_df[upcoming_df["Date"] <= week_end]
 
 if not this_week.empty:
-    tickers_this_week = ", ".join(this_week["Ticker"].unique().tolist())
-    st.warning(f"📅 **Earnings this week:** {tickers_this_week}")
+    st.warning("📅 **Earnings this week:**")
+    for _, row in this_week.iterrows():
+        eps_est = f" | EPS Estimate: ${row['EPS Estimate']:.2f}" if pd.notna(row.get("EPS Estimate")) else ""
+        st.warning(f"  • **{row['Ticker']}** — {pd.Timestamp(row['Date']).strftime('%Y-%m-%d')}{eps_est}")
 else:
     st.success("✅ No earnings in the next 7 days.")
 
