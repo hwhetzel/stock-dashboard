@@ -233,8 +233,14 @@ else:
         summary = notif["summary"]
         created = notif["created_at"]
 
-        with st.expander(f"📋 Session — {created}", expanded=False):
-            # Checkbox drives session state directly via on_change
+        # Title differs based on notification type
+        notif_type = summary.get("type", "session")
+        if notif_type == "csv_import":
+            expander_title = f"📥 CSV Import — {created}"
+        else:
+            expander_title = f"📋 Session — {created}"
+
+        with st.expander(expander_title, expanded=False):
             def on_check(nid=n_id):
                 key = f"chk_{nid}"
                 if st.session_state[key]:
@@ -251,39 +257,79 @@ else:
                 on_change=on_check,
             )
 
-            # ── Holdings movement ─────────────────────────────────────────────
-            movements = summary.get("holdings_movement", [])
-            if movements:
-                st.markdown("**📈 Holdings Movement (≥2% today)**")
-                for m in movements:
-                    sign = "+" if m["change_pct"] >= 0 else ""
-                    color = "green" if m["change_pct"] >= 0 else "red"
-                    st.markdown(
-                        f"<span style='color:{color}'>{m['ticker']} "
-                        f"${m['price']} ({sign}{m['change_pct']}%)</span>",
-                        unsafe_allow_html=True,
-                    )
+            # ── CSV Import summary ────────────────────────────────────────────
+            if notif_type == "csv_import":
+                accounts = summary.get("accounts", [])
+                total = summary.get("total_positions", 0)
+                st.markdown(f"**Imported {total} positions**" + (f" from: {', '.join(accounts)}" if accounts else ""))
 
-            # ── Watchlist changes ─────────────────────────────────────────────
-            changes = summary.get("watchlist_changes", [])
-            if changes:
-                st.markdown("**👀 Watchlist Changes (≥1% today)**")
-                for c in changes:
-                    sign = "+" if c["change_pct"] >= 0 else ""
-                    color = "green" if c["change_pct"] >= 0 else "red"
-                    target_str = f" | Target: ${c['target']:.2f}" if c.get("target") else ""
-                    st.markdown(
-                        f"<span style='color:{color}'>{c['ticker']} "
-                        f"${c['price']} ({sign}{c['change_pct']}%){target_str}</span>",
-                        unsafe_allow_html=True,
-                    )
+                added = summary.get("added", [])
+                if added:
+                    st.markdown("**🟢 New positions added**")
+                    for t in added:
+                        st.markdown(f"- {t}")
 
-            # ── Upcoming earnings ─────────────────────────────────────────────
-            earnings = summary.get("upcoming_earnings", [])
-            if earnings:
-                st.markdown("**📅 Upcoming Earnings (next 7 days)**")
-                for e in earnings:
-                    st.markdown(f"- {e['ticker']} — {e['date']}")
+                removed = summary.get("removed", [])
+                if removed:
+                    st.markdown("**🔴 Positions closed**")
+                    for t in removed:
+                        st.markdown(f"- {t}")
+
+                changed = summary.get("changed", [])
+                if changed:
+                    st.markdown("**🔄 Share count changes**")
+                    for c in changed:
+                        diff = c["share_diff"]
+                        direction = "▲" if diff > 0 else "▼"
+                        color = "green" if diff > 0 else "red"
+                        st.markdown(
+                            f"<span style='color:{color}'>**{c['symbol']}** "
+                            f"{c['old_shares']} → {c['new_shares']} shares "
+                            f"({direction}{abs(diff):.4f})</span>",
+                            unsafe_allow_html=True,
+                        )
+
+                moved = summary.get("moved_from_watchlist", [])
+                if moved:
+                    st.markdown("**📋 Removed from watchlist (now in portfolio)**")
+                    for t in moved:
+                        st.markdown(f"- {t}")
+
+                if not any([added, removed, changed, moved]):
+                    st.info("No changes detected since last import.")
+
+            # ── Session summary ───────────────────────────────────────────────
+            else:
+                movements = summary.get("holdings_movement", [])
+                if movements:
+                    st.markdown("**📈 Holdings Movement (≥2% today)**")
+                    for m in movements:
+                        sign = "+" if m["change_pct"] >= 0 else ""
+                        color = "green" if m["change_pct"] >= 0 else "red"
+                        st.markdown(
+                            f"<span style='color:{color}'>{m['ticker']} "
+                            f"${m['price']} ({sign}{m['change_pct']}%)</span>",
+                            unsafe_allow_html=True,
+                        )
+
+                changes = summary.get("watchlist_changes", [])
+                if changes:
+                    st.markdown("**👀 Watchlist Changes (≥1% today)**")
+                    for c in changes:
+                        sign = "+" if c["change_pct"] >= 0 else ""
+                        color = "green" if c["change_pct"] >= 0 else "red"
+                        target_str = f" | Target: ${c['target']:.2f}" if c.get("target") else ""
+                        st.markdown(
+                            f"<span style='color:{color}'>{c['ticker']} "
+                            f"${c['price']} ({sign}{c['change_pct']}%){target_str}</span>",
+                            unsafe_allow_html=True,
+                        )
+
+                earnings = summary.get("upcoming_earnings", [])
+                if earnings:
+                    st.markdown("**📅 Upcoming Earnings (next 7 days)**")
+                    for e in earnings:
+                        st.markdown(f"- {e['ticker']} — {e['date']}")
 
             # ── Delete individual ─────────────────────────────────────────────
             if st.button("🗑 Delete", key=f"del_{n_id}"):
