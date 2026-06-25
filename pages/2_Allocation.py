@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.figure_factory as ff
 import numpy as np
-from database import initialize_db, get_transactions
+from database import initialize_db, get_transactions, get_setting, get_known_accounts
 from data import get_bulk_current_prices, get_bulk_ticker_info, get_price_history
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -26,19 +26,26 @@ def compute_holdings(transactions):
     holdings = []
     for ticker, txs in by_ticker.items():
         shares_held = 0.0
-        cost_basis  = 0.0
+        cost_basis = 0.0
+        accounts = set()
         for tx in txs:
+            if tx.get("account"):
+                accounts.add(tx["account"])
             if tx["type"] == "buy":
-                cost_basis  += tx["shares"] * tx["price"]
+                cost_basis += tx["shares"] * tx["price"]
                 shares_held += tx["shares"]
             elif tx["type"] == "sell" and shares_held > 0:
-                avg  = cost_basis / shares_held
+                avg = cost_basis / shares_held
                 sell = min(tx["shares"], shares_held)
-                cost_basis  -= sell * avg
+                cost_basis -= sell * avg
                 shares_held -= sell
         if shares_held > 0.0001:
-            holdings.append({"ticker": ticker, "shares": shares_held, "cost_basis": cost_basis})
-
+            holdings.append({
+                "ticker": ticker,
+                "shares": shares_held,
+                "cost_basis": cost_basis,
+                "accounts": ", ".join(sorted(accounts)) if accounts else "",
+            })
     return holdings
 
 
@@ -56,17 +63,29 @@ prices       = get_bulk_current_prices(tickers)
 info_map     = get_bulk_ticker_info(tickers)
 
 # Build a flat DataFrame with market value and sector per holding
+
 rows = []
 for h in holdings:
-    t       = h["ticker"]
-    price   = prices.get(t, 0)
+    t = h["ticker"]
+    price = prices.get(t, 0)
     mkt_val = h["shares"] * price
-    sector  = info_map.get(t, {}).get("sector", "Unknown")
-    rows.append({"Ticker": t, "Market Value": mkt_val, "Sector": sector})
+    sector = info_map.get(t, {}).get("sector", "Unknown")
+    rows.append({
+        "Ticker": t,
+        "Market Value": mkt_val,
+        "Sector": sector,
+        "Account": h.get("accounts", ""),
+    })
 
 df = pd.DataFrame(rows)
 total_value = df["Market Value"].sum()
 df["Weight %"] = (df["Market Value"] / total_value * 100).round(2)
+
+# Determine if Account column should show
+show_account_col = (
+    get_setting("has_multiple_accounts", "false") == "true"
+    or len(get_known_accounts()) > 1
+)
 
 # ── Concentration warning ─────────────────────────────────────────────────────
 
@@ -102,12 +121,27 @@ with col1:
     st.plotly_chart(fig_ticker, use_container_width=True)
 
 with col2:
-    # Ticker weight table alongside the chart
-    display_df = df[["Ticker", "Market Value", "Weight %", "Sector"]].copy()
+    display_cols = ["Ticker", "Market Value", "Weight %", "Sector"]
+    if show_account_col:
+        display_cols = ["Ticker", "Account", "Market Value", "Weight %", "Sector"]
+    display_df = df[display_cols].copy()
     display_df["Market Value"] = display_df["Market Value"].map("${:,.2f}".format)
-    display_df["Weight %"]     = display_df["Weight %"].map("{:.2f}%".format)
+    display_df["Weight %"] = display_df["Weight %"].map("{:.2f}%".format)
     display_df = display_df.sort_values("Weight %", ascending=False)
     st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    # Group by account breakdown — only shown when multiple accounts exist
+    if show_account_col:
+        st.markdown("**By Account**")
+        acct_df = (
+            df.groupby("Account")["Market Value"]
+            .sum()
+            .reset_index()
+        )
+        acct_df["Weight %"] = (acct_df["Market Value"] / total_value * 100).round(2)
+        acct_df["Market Value"] = acct_df["Market Value"].map("${:,.2f}".format)
+        acct_df["Weight %"] = acct_df["Weight %"].map("{:.2f}%".format)
+        st.dataframe(acct_df, use_container_width=True, hide_index=True)
 
 st.divider()
 
