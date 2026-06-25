@@ -22,6 +22,7 @@ apply_theme()
 
 st.title("Analytics")
 
+
 # ── Rebuild holdings ───────────────────────────────────────────────────────────
 
 def compute_holdings(transactions):
@@ -57,6 +58,26 @@ def compute_holdings(transactions):
 
 transactions = get_transactions()
 holdings = compute_holdings(transactions)
+
+from datetime import date as dt
+today = dt.today().strftime("%Y-%m-%d")
+csv_transactions = [t for t in transactions if t.get("source") == "csv_import"]
+
+if csv_transactions:
+    multi_date_count = sum(1 for t in csv_transactions if t["date"] == today)
+    if multi_date_count > 0:
+        st.warning(
+            f"⚠️ **{multi_date_count} imported position(s)** have today as their open date — "
+            f"this happens when Ameriprise reports 'Multiple' open dates for a position. "
+            f"Total return, annualized return, and Sharpe ratio will not be accurate for these positions. "
+            f"To fix, go to **Portfolio → Edit / Delete a Transaction** and update the date "
+            f"to your actual purchase date for each affected position."
+        )
+    else:
+        st.info(
+            "ℹ️ Returns are calculated from your transaction dates. "
+            "If any dates are incorrect, update them on the Portfolio page."
+        )
 
 if not holdings:
     st.info("No holdings yet — add transactions on the Portfolio page.")
