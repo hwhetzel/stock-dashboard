@@ -14,6 +14,7 @@ from database import (
     get_watchlist,
     get_setting,
     set_setting,
+    get_known_accounts
 )
 from data import get_bulk_current_prices, get_earnings_dates
 
@@ -37,7 +38,10 @@ def get_held_tickers(transactions):
     for ticker, txs in by_ticker.items():
         shares = 0.0
         cost_basis = 0.0
+        accounts = set()
         for tx in txs:
+            if tx.get("account"):
+                accounts.add(tx["account"])
             if tx["type"] == "buy":
                 cost_basis += tx["shares"] * tx["price"]
                 shares += tx["shares"]
@@ -47,7 +51,12 @@ def get_held_tickers(transactions):
                 cost_basis -= sell * avg
                 shares -= sell
         if shares > 0.0001:
-            held.append({"ticker": ticker, "shares": shares, "cost_basis": cost_basis})
+            held.append({
+                "ticker": ticker,
+                "shares": shares,
+                "cost_basis": cost_basis,
+                "accounts": ", ".join(sorted(accounts)) if accounts else "",
+            })
     return held
 
 
@@ -86,11 +95,12 @@ def generate_session_summary() -> dict:
             prev = fi.previous_close
             if current and prev and prev > 0:
                 change_pct = (current - prev) / prev * 100
-                if abs(change_pct) >= 2.0:
+                if abs(change_pct) >= price_threshold:
                     holdings_movement.append({
                         "ticker": ticker,
                         "change_pct": round(change_pct, 2),
                         "price": round(current, 2),
+                        "accounts": h.get("accounts", ""),
                     })
         except Exception:
             pass
@@ -301,13 +311,19 @@ else:
             # ── Session summary ───────────────────────────────────────────────
             else:
                 movements = summary.get("holdings_movement", [])
+                show_account_col = (
+                    get_setting("has_multiple_accounts", "false") == "true"
+                    or len(get_known_accounts()) > 1
+                )
                 if movements:
                     st.markdown("**📈 Holdings Movement (≥2% today)**")
                     for m in movements:
                         sign = "+" if m["change_pct"] >= 0 else ""
                         color = "green" if m["change_pct"] >= 0 else "red"
+                        acct_str = f" | {m['accounts']}" if show_account_col and m.get("accounts") else ""
                         st.markdown(
-                            f"<span style='color:{color}'>{m['ticker']} "
+                            f"<span style='color:{color}'>{m['ticker']}"
+                            f"{acct_str} "
                             f"${m['price']} ({sign}{m['change_pct']}%)</span>",
                             unsafe_allow_html=True,
                         )
