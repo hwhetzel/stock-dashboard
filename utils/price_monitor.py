@@ -1,27 +1,20 @@
-import streamlit as st
-from datetime import datetime
-from database import get_transactions, get_watchlist, get_setting, get_known_accounts
 import yfinance as yf
-from streamlit_autorefresh import st_autorefresh 
+from datetime import datetime, timedelta
+from database import (
+    get_transactions,
+    get_watchlist,
+    get_setting,
+    add_notification,
+)
 
 
-def check_price_thresholds() -> list[dict]:
-    """
-    Check current prices against notification thresholds.
-    Returns list of alerts with ticker, price, change_pct, threshold_type.
-    """
-    price_threshold = float(str(get_setting("notify_price_change_pct", "2.0")))
-    watch_threshold = float(str(get_setting("notify_watchlist_change_pct", "1.0")))
-    notify_holdings_on = get_setting("notify_holdings", "1") == "1"
-    notify_watchlist_on = get_setting("notify_watchlist", "1") == "1"
-
-    # Build held tickers
+def _get_held_tickers() -> list[str]:
+    """Return list of currently held tickers from transactions."""
     transactions = get_transactions()
     by_ticker: dict = {}
     for tx in sorted(transactions, key=lambda x: x["date"]):
         by_ticker.setdefault(tx["ticker"], []).append(tx)
-
-    held_tickers = []
+    held = []
     for ticker, txs in by_ticker.items():
         shares = 0.0
         for tx in txs:
@@ -30,153 +23,192 @@ def check_price_thresholds() -> list[dict]:
             elif tx["type"] == "sell":
                 shares -= tx["shares"]
         if shares > 0.0001:
-            held_tickers.append(ticker)
+            held.append(ticker)
+    return held
 
+
+def _check_holdings_movement(held_tickers: list[str], threshold: float) -> list[dict]:
+    """Check holdings for price movement above threshold."""
+    alerts = []
+    for ticker in held_tickers:
+        try:
+            fi = yf.Ticker(ticker).fast_info
+            current = fi.last_price
+            prev = fi.previous_close
+            if current and prev and prev > 0:
+                change_pct = (current - prev) / prev * 100
+                if abs(change_pct) >= threshold:
+                    alerts.append({
+                        "ticker": ticker,
+                        "price": round(current, 2),
+                        "change_pct": round(change_pct, 2),
+                        "threshold_type": "Holdings Movement",
+                    })
+        except Exception:
+            pass
+    return alerts
+
+
+def _check_watchlist_movement(watchlist: list[dict], threshold: float) -> list[dict]:
+    """Check watchlist for price movement above threshold."""
+    alerts = []
+    for w in watchlist:
+        ticker = w["ticker"]
+        try:
+            fi = yf.Ticker(ticker).fast_info
+            current = fi.last_price
+            prev = fi.previous_close
+            if current and prev and prev > 0:
+                change_pct = (current - prev) / prev * 100
+                if abs(change_pct) >= threshold:
+                    alerts.append({
+                        "ticker": ticker,
+                        "price": round(current, 2),
+                        "change_pct": round(change_pct, 2),
+                        "threshold_type": "Watchlist Change",
+                    })
+        except Exception:
+            pass
+    return alerts
+
+
+def _check_upcoming_earnings(all_tickers: list[str], lead_days: int) -> list[dict]:
+    """Check for upcoming earnings within lead_days."""
+    from data import get_earnings_dates
+    alerts = []
+    now = datetime.now()
+    deadline = now + timedelta(days=lead_days)
+    for ticker in all_tickers:
+        try:
+            df = get_earnings_dates(ticker, limit=4)
+            if df.empty:
+                continue
+            for dt_idx in df.index:
+                dt_naive = dt_idx.tz_localize(None) if dt_idx.tzinfo else dt_idx
+                if now <= dt_naive <= deadline:
+                    days_away = (dt_naive - now).days
+                    alerts.append({
+                        "ticker": ticker,
+                        "date": dt_naive.strftime("%Y-%m-%d"),
+                        "days_away": days_away,
+                        "threshold_type": "Upcoming Earnings",
+                    })
+        except Exception:
+            pass
+    return alerts
+
+
+def _check_upcoming_dividends(held_tickers: list[str], lead_days: int) -> list[dict]:
+    """Check for upcoming ex-dividend dates within lead_days."""
+    alerts = []
+    now = datetime.now()
+    deadline = now + timedelta(days=lead_days)
+    for ticker in held_tickers:
+        try:
+            info = yf.Ticker(ticker).info
+            ex_div = info.get("exDividendDate")
+            if ex_div:
+                ex_div_dt = datetime.fromtimestamp(ex_div)
+                if now <= ex_div_dt <= deadline:
+                    days_away = (ex_div_dt - now).days
+                    alerts.append({
+                        "ticker": ticker,
+                        "date": ex_div_dt.strftime("%Y-%m-%d"),
+                        "days_away": days_away,
+                        "threshold_type": "Upcoming Ex-Dividend",
+                    })
+        except Exception:
+            pass
+    return alerts
+
+
+def run_background_checks() -> list[dict]:
+    """
+    Run all threshold checks.
+    Called by the background thread in launcher.py.
+    Returns list of alert dicts.
+    """
+    # Check if background alerts are enabled
+    if get_setting("price_alerts_enabled", "0") != "1":
+        return []
+
+    price_threshold = float(str(get_setting("notify_price_change_pct", "2.0")))
+    watch_threshold = float(str(get_setting("notify_watchlist_change_pct", "1.0")))
+    earnings_lead = int(str(get_setting("notify_earnings_lead_days", "7")))
+    dividend_lead = int(str(get_setting("notify_dividend_lead_days", "7")))
+    notify_holdings_on = get_setting("notify_holdings", "1") == "1"
+    notify_watchlist_on = get_setting("notify_watchlist", "1") == "1"
+    notify_earnings_on = get_setting("notify_earnings", "1") == "1"
+    notify_dividends_on = get_setting("notify_dividends", "1") == "1"
+
+    held_tickers = _get_held_tickers()
     watchlist = get_watchlist()
     watch_tickers = [w["ticker"] for w in watchlist]
+    all_tickers = list(dict.fromkeys(held_tickers + watch_tickers))
 
     alerts = []
 
-    # Check holdings
-    if notify_holdings_on:
-        for ticker in held_tickers:
-            # Skip if we already alerted this ticker recently this session
-            last_alert_key = f"price_alert_last_{ticker}"
-            last_alert = st.session_state.get(last_alert_key)
-            if last_alert:
-                minutes_since = (datetime.now() - last_alert).total_seconds() / 60
-                check_interval = float(str(get_setting("idle_check_interval_mins", "5")))
-                if minutes_since < check_interval:
-                    continue
+    if notify_holdings_on and held_tickers:
+        alerts += _check_holdings_movement(held_tickers, price_threshold)
 
-            try:
-                fi = yf.Ticker(ticker).fast_info
-                current = fi.last_price
-                prev = fi.previous_close
-                if current and prev and prev > 0:
-                    change_pct = (current - prev) / prev * 100
-                    if abs(change_pct) >= price_threshold:
-                        alerts.append({
-                            "ticker": ticker,
-                            "price": round(current, 2),
-                            "change_pct": round(change_pct, 2),
-                            "threshold_type": "Holdings Movement",
-                        })
-                        st.session_state[last_alert_key] = datetime.now()
-            except Exception:
-                pass
+    if notify_watchlist_on and watchlist:
+        alerts += _check_watchlist_movement(watchlist, watch_threshold)
 
-    # Check watchlist
-    if notify_watchlist_on:
-        for ticker in watch_tickers:
-            last_alert_key = f"price_alert_last_{ticker}"
-            last_alert = st.session_state.get(last_alert_key)
-            if last_alert:
-                minutes_since = (datetime.now() - last_alert).total_seconds() / 60
-                check_interval = float(str(get_setting("idle_check_interval_mins", "5")))
-                if minutes_since < check_interval:
-                    continue
+    if notify_earnings_on and all_tickers:
+        alerts += _check_upcoming_earnings(all_tickers, earnings_lead)
 
-            try:
-                fi = yf.Ticker(ticker).fast_info
-                current = fi.last_price
-                prev = fi.previous_close
-                if current and prev and prev > 0:
-                    change_pct = (current - prev) / prev * 100
-                    if abs(change_pct) >= watch_threshold:
-                        alerts.append({
-                            "ticker": ticker,
-                            "price": round(current, 2),
-                            "change_pct": round(change_pct, 2),
-                            "threshold_type": "Watchlist Change",
-                        })
-                        st.session_state[last_alert_key] = datetime.now()
-            except Exception:
-                pass
+    if notify_dividends_on and held_tickers:
+        alerts += _check_upcoming_dividends(held_tickers, dividend_lead)
 
     return alerts
 
 
-def fire_desktop_alerts(alerts: list[dict]):
-    """Fire plyer desktop popup for each alert."""
+def fire_alerts(alerts: list[dict]):
+    """
+    Save alerts to notifications DB and fire plyer desktop popup.
+    Called by background thread after run_background_checks().
+    """
     if not alerts:
         return
-    try:
-        import subprocess, sys
-        for alert in alerts:
-            sign = "+" if alert["change_pct"] >= 0 else ""
-            message = (
-                f"{alert['ticker']} ${alert['price']} "
-                f"({sign}{alert['change_pct']}%) — {alert['threshold_type']}"
-            )
-            script = (
-                "from plyer import notification; "
-                f"notification.notify(title='Stock Dashboard Alert', "
-                f"message={repr(message)}, "
-                f"app_name='Stock Dashboard', "
-                f"timeout=10)"
-            )
-            subprocess.Popen([sys.executable, "-c", script])
-    except Exception:
-        pass
 
+    # Save to notifications DB
+    from datetime import datetime
+    summary = {
+        "type": "price_alert",
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "alerts": alerts,
+    }
+    add_notification(summary)
 
-def run_idle_monitor():
-    """
-    Inject idle detection JS and run autorefresh when idle.
-    Call this at the top of every page after apply_theme().
-    Only fires price checks and popups when delivery is set to desktop
-    and auto-refresh is enabled in settings.
-    """
-    # Check if feature is enabled
-    if get_setting("idle_monitor_enabled", "0") != "1":
-        return
+    # Fire desktop popup if delivery method is set to desktop
     if get_setting("notify_delivery", "app") != "desktop":
         return
 
-    idle_timeout_mins = float(str(get_setting("idle_timeout_mins", "5")))
-    check_interval_mins = float(str(get_setting("idle_check_interval_mins", "5")))
-    idle_timeout_ms = int(idle_timeout_mins * 60 * 1000)
+    try:
+        import subprocess, sys
+        # Build message — max 3 alerts in popup to keep it readable
+        lines = []
+        for a in alerts[:3]:
+            if a["threshold_type"] in ("Holdings Movement", "Watchlist Change"):
+                sign = "+" if a["change_pct"] >= 0 else ""
+                lines.append(
+                    f"{a['ticker']} ${a['price']} ({sign}{a['change_pct']}%) — {a['threshold_type']}"
+                )
+            elif a["threshold_type"] in ("Upcoming Earnings", "Upcoming Ex-Dividend"):
+                lines.append(
+                    f"{a['ticker']} — {a['threshold_type']} in {a['days_away']} day(s)"
+                )
+        if len(alerts) > 3:
+            lines.append(f"...and {len(alerts) - 3} more")
+        message = "\n".join(lines)
 
-    # Inject JS to track user activity and set a cookie/flag when idle
-    import streamlit.components.v1 as components
-    components.html(
-        f"""
-        <script>
-        let idleTimer;
-        let isIdle = false;
-
-        function resetTimer() {{
-            clearTimeout(idleTimer);
-            isIdle = false;
-            window.parent.postMessage({{type: 'idle', value: false}}, '*');
-            idleTimer = setTimeout(() => {{
-                isIdle = true;
-                window.parent.postMessage({{type: 'idle', value: true}}, '*');
-            }}, {idle_timeout_ms});
-        }}
-
-        document.addEventListener('mousemove', resetTimer);
-        document.addEventListener('keypress', resetTimer);
-        document.addEventListener('click', resetTimer);
-        document.addEventListener('scroll', resetTimer);
-        resetTimer();
-        </script>
-        """,
-        height=0,
-    )
-
-    # Track idle state in session state
-    if "is_idle" not in st.session_state:
-        st.session_state["is_idle"] = False
-
-    # Use autorefresh when idle — interval matches check interval setting
-    if st.session_state.get("is_idle", False):
-        st_autorefresh(
-            interval=int(check_interval_mins * 60 * 1000),
-            key="idle_autorefresh",
+        script = (
+            "from plyer import notification; "
+            f"notification.notify(title='Stock Dashboard Alert', "
+            f"message={repr(message)}, "
+            f"app_name='Stock Dashboard', "
+            f"timeout=10)"
         )
-        # Run price checks and fire alerts
-        alerts = check_price_thresholds()
-        if alerts:
-            fire_desktop_alerts(alerts)
+        subprocess.Popen([sys.executable, "-c", script])
+    except Exception:
+        pass

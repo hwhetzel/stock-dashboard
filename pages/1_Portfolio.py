@@ -21,8 +21,6 @@ initialize_db()
 from utils.theme import apply_theme
 apply_theme()
 
-from utils.price_monitor import run_idle_monitor
-run_idle_monitor()
 
 # Only reset on true page load, not on reruns (e.g. fetch button)
 if not st.session_state.get("portfolio_loaded"):

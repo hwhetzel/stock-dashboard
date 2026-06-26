@@ -16,18 +16,13 @@ from database import (
     set_setting,
     get_known_accounts
 )
-from data import get_bulk_current_prices, get_earnings_dates
+from data import get_earnings_dates
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Notifications", layout="wide")
 initialize_db()
 
-from utils.theme import apply_theme
-apply_theme()
-
-from utils.price_monitor import run_idle_monitor
-run_idle_monitor()
 
 st.title("Notifications")
 
@@ -69,7 +64,7 @@ def generate_session_summary() -> dict:
     Checks: holdings movement, watchlist price changes,
     upcoming earnings (next 7 days), upcoming dividends.
     """
-    from database import get_setting
+
     price_threshold = float(str(get_setting("notify_price_change_pct", "2.0")))
     watch_threshold = float(str(get_setting("notify_watchlist_change_pct", "1.0")))
     earnings_days = int(str(get_setting("notify_earnings_lead_days", "7")))
@@ -85,48 +80,49 @@ def generate_session_summary() -> dict:
     tickers_watch = [w["ticker"] for w in watchlist]
     all_tickers = list(dict.fromkeys(tickers_held + tickers_watch))
 
-    prices = get_bulk_current_prices(all_tickers)
 
     # ── Holdings movement (>2% change today) ─────────────────────────────────
     import yfinance as yf
     holdings_movement = []
-    for h in holdings:
-        ticker = h["ticker"]
-        try:
-            fi = yf.Ticker(ticker).fast_info
-            current = fi.last_price
-            prev = fi.previous_close
-            if current and prev and prev > 0:
-                change_pct = (current - prev) / prev * 100
-                if abs(change_pct) >= price_threshold:
-                    holdings_movement.append({
-                        "ticker": ticker,
-                        "change_pct": round(change_pct, 2),
-                        "price": round(current, 2),
-                        "accounts": h.get("accounts", ""),
-                    })
-        except Exception:
-            pass
+    if notify_holdings_on:
+        for h in holdings:
+            ticker = h["ticker"]
+            try:
+                fi = yf.Ticker(ticker).fast_info
+                current = fi.last_price
+                prev = fi.previous_close
+                if current and prev and prev > 0:
+                    change_pct = (current - prev) / prev * 100
+                    if abs(change_pct) >= price_threshold:
+                        holdings_movement.append({
+                            "ticker": ticker,
+                            "change_pct": round(change_pct, 2),
+                            "price": round(current, 2),
+                            "accounts": h.get("accounts", ""),
+                        })
+            except Exception:
+                pass
 
     # ── Watchlist price changes (>1% change today) ────────────────────────────
     watchlist_changes = []
-    for w in watchlist:
-        ticker = w["ticker"]
-        try:
-            fi = yf.Ticker(ticker).fast_info
-            current = fi.last_price
-            prev = fi.previous_close
-            if current and prev and prev > 0:
-                change_pct = (current - prev) / prev * 100
-                if abs(change_pct) >= 1.0:
-                    watchlist_changes.append({
-                        "ticker": ticker,
-                        "change_pct": round(change_pct, 2),
-                        "price": round(current, 2),
-                        "target": w.get("target_price"),
-                    })
-        except Exception:
-            pass
+    if notify_watchlist_on:
+        for w in watchlist:
+            ticker = w["ticker"]
+            try:
+                fi = yf.Ticker(ticker).fast_info
+                current = fi.last_price
+                prev = fi.previous_close
+                if current and prev and prev > 0:
+                    change_pct = (current - prev) / prev * 100
+                    if abs(change_pct) >= watch_threshold:
+                        watchlist_changes.append({
+                            "ticker": ticker,
+                            "change_pct": round(change_pct, 2),
+                            "price": round(current, 2),
+                            "target": w.get("target_price"),
+                        })
+            except Exception:
+                pass
 
     # ── Upcoming earnings (next 7 days) ───────────────────────────────────────
     upcoming_earnings = []
@@ -250,6 +246,8 @@ else:
         notif_type = summary.get("type", "session")
         if notif_type == "csv_import":
             expander_title = f"📥 CSV Import — {created}"
+        elif notif_type == "price_alert":
+            expander_title = f"🔔 Alert — {created}"
         else:
             expander_title = f"📋 Session — {created}"
 
@@ -310,6 +308,50 @@ else:
 
                 if not any([added, removed, changed, moved]):
                     st.info("No changes detected since last import.")
+
+        # ── Price alert summary ───────────────────────────────────────────
+            elif notif_type == "price_alert":
+                alerts = summary.get("alerts", [])
+                if not alerts:
+                    st.info("No alert details available.")
+                else:
+                    # Group by threshold type
+                    holdings_alerts = [a for a in alerts if a["threshold_type"] == "Holdings Movement"]
+                    watchlist_alerts = [a for a in alerts if a["threshold_type"] == "Watchlist Change"]
+                    earnings_alerts = [a for a in alerts if a["threshold_type"] == "Upcoming Earnings"]
+                    dividend_alerts = [a for a in alerts if a["threshold_type"] == "Upcoming Ex-Dividend"]
+
+                    if holdings_alerts:
+                        st.markdown("**📈 Holdings Movement**")
+                        for a in holdings_alerts:
+                            sign = "+" if a["change_pct"] >= 0 else ""
+                            color = "green" if a["change_pct"] >= 0 else "red"
+                            st.markdown(
+                                f"<span style='color:{color}'>{a['ticker']} "
+                                f"${a['price']} ({sign}{a['change_pct']}%)</span>",
+                                unsafe_allow_html=True,
+                            )
+
+                    if watchlist_alerts:
+                        st.markdown("**👀 Watchlist Change**")
+                        for a in watchlist_alerts:
+                            sign = "+" if a["change_pct"] >= 0 else ""
+                            color = "green" if a["change_pct"] >= 0 else "red"
+                            st.markdown(
+                                f"<span style='color:{color}'>{a['ticker']} "
+                                f"${a['price']} ({sign}{a['change_pct']}%)</span>",
+                                unsafe_allow_html=True,
+                            )
+
+                    if earnings_alerts:
+                        st.markdown("**📅 Upcoming Earnings**")
+                        for a in earnings_alerts:
+                            st.markdown(f"- {a['ticker']} — {a['date']} ({a['days_away']} day(s) away)")
+
+                    if dividend_alerts:
+                        st.markdown("**💰 Upcoming Ex-Dividend**")
+                        for a in dividend_alerts:
+                            st.markdown(f"- {a['ticker']} — {a['date']} ({a['days_away']} day(s) away)")
 
             # ── Session summary ───────────────────────────────────────────────
             else:

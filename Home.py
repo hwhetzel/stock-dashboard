@@ -13,8 +13,6 @@ st.set_page_config(page_title="Stock Dashboard", page_icon="📈", layout="wide"
 initialize_db()
 apply_theme()
 
-from utils.price_monitor import run_idle_monitor
-run_idle_monitor()
 
 # ── Weekly CSV reminder banner ────────────────────────────────────────────────
 

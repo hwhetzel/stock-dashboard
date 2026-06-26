@@ -12,9 +12,6 @@ initialize_db()
 from utils.theme import apply_theme
 apply_theme()
 
-from utils.price_monitor import run_idle_monitor
-run_idle_monitor()
-
 st.title("Earnings")
 
 # ── Build ticker list from holdings + watchlist ───────────────────────────────

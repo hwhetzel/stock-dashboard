@@ -3,9 +3,6 @@ from database import (
     initialize_db,
     get_setting,
     set_setting,
-    delete_all_notifications,
-    get_transactions,
-    get_watchlist,
 )
 import sqlite3
 import os
@@ -18,8 +15,6 @@ initialize_db()
 from utils.theme import apply_theme
 apply_theme()
 
-from utils.price_monitor import run_idle_monitor
-run_idle_monitor()
 
 st.title("Settings")
 
@@ -183,33 +178,25 @@ if st.button("Save News Settings"):
     st.success("News settings saved.")
 st.divider()
 
-# ── Auto-Refresh & Idle Monitor Settings ──────────────────────────────────────────────────────────────
+# ── Alert Settings ──────────────────────────────────────────────────────────────
 
-st.subheader("Auto-Refresh & Idle Monitor")
-st.caption("Automatically checks prices and sends desktop alerts when you haven't interacted with the app for a set time.")
+st.subheader("Alert Settings")
+st.caption("Background price checks run while the app is open, even when minimized.")
 
-idle_monitor_enabled = st.toggle(
-    "Enable idle price monitor",
-    value=get_setting("idle_monitor_enabled", "0") == "1",
+price_alerts_enabled = st.toggle(
+    "Enable background price alerts",
+    value=get_setting("price_alerts_enabled", "0") == "1",
 )
-col_idle1, col_idle2 = st.columns(2)
-idle_timeout_mins = col_idle1.number_input(
-    "Idle timeout (minutes)",
+price_check_interval = st.number_input(
+    "Price check interval (minutes)",
     min_value=1, max_value=60,
-    value=int(str(get_setting("idle_timeout_mins", "5"))),
+    value=int(str(get_setting("price_check_interval_mins", "5"))),
     step=1,
 )
-check_interval_mins = col_idle2.number_input(
-    "Price check interval when idle (minutes)",
-    min_value=1, max_value=60,
-    value=int(str(get_setting("idle_check_interval_mins", "5"))),
-    step=1,
-)
-if st.button("Save Auto-Refresh Settings"):
-    set_setting("idle_monitor_enabled", "1" if idle_monitor_enabled else "0")
-    set_setting("idle_timeout_mins", str(idle_timeout_mins))
-    set_setting("idle_check_interval_mins", str(check_interval_mins))
-    st.success("Auto-refresh settings saved.")
+if st.button("Save Alert Settings"):
+    set_setting("price_alerts_enabled", "1" if price_alerts_enabled else "0")
+    set_setting("price_check_interval_mins", str(price_check_interval))
+    st.success("Alert settings saved.")
 st.divider()
 
 # ── CSV import info ───────────────────────────────────────────────────────────
