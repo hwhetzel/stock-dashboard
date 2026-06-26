@@ -18,6 +18,9 @@ initialize_db()
 from utils.theme import apply_theme
 apply_theme()
 
+from utils.price_monitor import run_idle_monitor
+run_idle_monitor()
+
 st.title("Settings")
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -178,6 +181,35 @@ news_per_ticker = st.number_input(
 if st.button("Save News Settings"):
     set_setting("news_articles_per_ticker", str(news_per_ticker))
     st.success("News settings saved.")
+st.divider()
+
+# ── Auto-Refresh & Idle Monitor Settings ──────────────────────────────────────────────────────────────
+
+st.subheader("Auto-Refresh & Idle Monitor")
+st.caption("Automatically checks prices and sends desktop alerts when you haven't interacted with the app for a set time.")
+
+idle_monitor_enabled = st.toggle(
+    "Enable idle price monitor",
+    value=get_setting("idle_monitor_enabled", "0") == "1",
+)
+col_idle1, col_idle2 = st.columns(2)
+idle_timeout_mins = col_idle1.number_input(
+    "Idle timeout (minutes)",
+    min_value=1, max_value=60,
+    value=int(str(get_setting("idle_timeout_mins", "5"))),
+    step=1,
+)
+check_interval_mins = col_idle2.number_input(
+    "Price check interval when idle (minutes)",
+    min_value=1, max_value=60,
+    value=int(str(get_setting("idle_check_interval_mins", "5"))),
+    step=1,
+)
+if st.button("Save Auto-Refresh Settings"):
+    set_setting("idle_monitor_enabled", "1" if idle_monitor_enabled else "0")
+    set_setting("idle_timeout_mins", str(idle_timeout_mins))
+    set_setting("idle_check_interval_mins", str(check_interval_mins))
+    st.success("Auto-refresh settings saved.")
 st.divider()
 
 # ── CSV import info ───────────────────────────────────────────────────────────

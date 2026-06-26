@@ -21,6 +21,9 @@ initialize_db()
 from utils.theme import apply_theme
 apply_theme()
 
+from utils.price_monitor import run_idle_monitor
+run_idle_monitor()
+
 # Only reset on true page load, not on reruns (e.g. fetch button)
 if not st.session_state.get("portfolio_loaded"):
     for key in [k for k in list(st.session_state.keys()) if isinstance(k, str) and k.startswith("edit_tx_fetch_msg_")]:

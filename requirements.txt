@@ -7,3 +7,4 @@ pywebview
 lxml
 windows-curses
 plyer
+streamlit-autorefresh
