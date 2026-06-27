@@ -226,6 +226,10 @@ def main():
     # Create session summary notification once on launch
     create_session_notification()
 
+    # Wait until notification is in DB before opening the window
+    # 1.4s measured for notification creation + buffer
+    time.sleep(3)
+
     # Start background price monitor thread
     monitor_thread = threading.Thread(target=background_price_monitor, daemon=True)
     monitor_thread.start()
