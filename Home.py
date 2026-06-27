@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import yfinance as yf
 import pandas as pd
 from database import initialize_db, get_transactions, get_setting, get_known_accounts, upsert_portfolio_snapshot
-from data import get_bulk_current_prices, get_news, get_earnings_dates
+from data import get_bulk_current_prices, get_news, get_earnings_dates, get_company_names
 from utils.theme import apply_theme
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -74,6 +74,7 @@ tickers = [h["ticker"] for h in holdings]
 
 with st.spinner("Loading portfolio, please wait before navigating away..."):
     prices = get_bulk_current_prices(tickers)
+    company_names = get_company_names(tickers)  # add this line
 
     # Pre-fetch news and earnings inside the spinner so they're ready when page renders
     news_items_raw = {}
@@ -197,8 +198,10 @@ with snap_col:
         unreal_pct = (unreal / h["cost_basis"] * 100) if unreal and h["cost_basis"] else None
         d = day_data.get(ticker, {})
         row = {"Ticker": ticker}
+        row["Company"] = company_names.get(ticker, ticker)
         if show_account_col:
             row["Account"] = h.get("accounts", "")
+        row["Price"] = ...
         row["Price"] = f"${price:,.2f}" if price else "N/A"
         row["Value"] = f"${mkt_val:,.2f}" if mkt_val else "N/A"
         row["Day %"] = f"{d['change_pct']:+.2f}%" if d.get("change_pct") is not None else "N/A"

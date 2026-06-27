@@ -10,7 +10,7 @@ from database import (
     get_known_accounts,
     get_setting,
 )
-from data import get_bulk_current_prices
+from data import get_bulk_current_prices, get_company_names
 from utils.csv_parser import parse_unrealized_gl_csv, apply_csv_import
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -81,14 +81,16 @@ def compute_holdings(transactions: list[dict]) -> pd.DataFrame:
 
 
 def enrich_with_market_data(holdings: pd.DataFrame) -> pd.DataFrame:
-    """Add live price, market value, and unrealized G/L to the holdings table."""
+    """Add live price, market value, unrealized G/L, and company name to holdings."""
     if holdings.empty:
         return holdings
 
     tickers = holdings["Ticker"].tolist()
     prices = get_bulk_current_prices(tickers)
+    names = get_company_names(tickers)
 
     holdings = holdings.copy()
+    holdings["Company"] = holdings["Ticker"].map(names)
     holdings["Current Price"] = holdings["Ticker"].map(prices)
     holdings["Market Value"] = (holdings["Shares"] * holdings["Current Price"]).round(2)
     holdings["Unrealized G/L"] = (holdings["Market Value"] - holdings["Cost Basis"]).round(2)
@@ -111,11 +113,17 @@ def show_holdings_table(holdings: pd.DataFrame, show_account_col: bool):
     """Render the styled holdings dataframe, conditionally showing Account column."""
     display = holdings.copy()
 
+    # Build column order: Ticker, Company, [Account], then the rest
+    front_cols = ["Ticker", "Company"]
     if show_account_col and "_accounts" in display.columns:
-        display.insert(1, "Account", display["_accounts"])
+        display.insert(2, "Account", display["_accounts"])
+        front_cols = ["Ticker", "Company", "Account"]
 
-    # Drop internal column before display
     display = display.drop(columns=["_accounts"], errors="ignore")
+
+    # Reorder so Ticker/Company/Account come first
+    remaining = [c for c in display.columns if c not in front_cols]
+    display = display[front_cols + remaining]
 
     format_map = {
         "Shares": "{:.4f}",
@@ -128,11 +136,11 @@ def show_holdings_table(holdings: pd.DataFrame, show_account_col: bool):
         "Realized G/L": "${:.2f}",
     }
     gl_cols = [c for c in ["Unrealized G/L", "Unrealized G/L %", "Realized G/L"] if c in display.columns]
-
-    styled = display.style.map(color_value, subset=gl_cols).format(  # type: ignore[call-overload]
-    {k: v for k, v in format_map.items() if k in display.columns},
-    na_rep="N/A",
-)
+ 
+    styled = display.style.map(color_value, subset=gl_cols).format( # type: ignore[call-overload]
+        {k: v for k, v in format_map.items() if k in display.columns},
+        na_rep="N/A",
+    )
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
 

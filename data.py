@@ -103,6 +103,23 @@ def get_bulk_ticker_info(tickers: list[str]) -> dict[str, dict]:
     return {t: get_ticker_info(t) for t in tickers}
 
 
+@st.cache_data(ttl=GENERAL_TTL)
+def get_company_names(tickers: list[str]) -> dict[str, str]:
+    """
+    Return {ticker: company_name} for a list of tickers.
+    Falls back to the ticker symbol if longName is unavailable.
+    """
+    result = {}
+    for t in tickers:
+        try:
+            info = get_ticker_info(t)
+            name = info.get("longName") or info.get("shortName") or t
+            result[t] = name
+        except Exception:
+            result[t] = t
+    return result
+
+
 # ── Dividends ─────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=GENERAL_TTL)

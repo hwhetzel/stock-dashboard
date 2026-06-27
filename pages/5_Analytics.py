@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from database import initialize_db, get_transactions, get_setting, get_known_accounts, get_portfolio_snapshots, get_snapshot_count
-from data import get_price_history, get_bulk_current_prices
+from data import get_price_history, get_bulk_current_prices, get_company_names
 from utils.metrics import (
     calculate_returns,
     calculate_total_return,
@@ -84,6 +84,7 @@ if not holdings:
     st.stop()
 
 tickers = [h["ticker"] for h in holdings]
+names = get_company_names(tickers)
 
 # ── Period selector ────────────────────────────────────────────────────────────
 
@@ -250,7 +251,7 @@ performance_rows = []
 for t in tickers:
     if t in price_history and not price_history[t].empty:
         ret = calculate_total_return(price_history[t])
-        row = {"Ticker": t, "Return %": round(ret, 2)}
+        row = {"Ticker": t, "Company": names.get(t, t), "Return %": round(ret, 2)}
         if show_account_col:
             row["Account"] = account_map.get(t, "")
         performance_rows.append(row)

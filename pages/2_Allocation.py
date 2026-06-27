@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.figure_factory as ff
 import numpy as np
 from database import initialize_db, get_transactions, get_setting, get_known_accounts
-from data import get_bulk_current_prices, get_bulk_ticker_info, get_price_history
+from data import get_bulk_current_prices, get_bulk_ticker_info, get_price_history, get_company_names
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -59,9 +59,10 @@ if not holdings:
 
 # ── Fetch live prices and sector info ─────────────────────────────────────────
 
-tickers      = [h["ticker"] for h in holdings]
-prices       = get_bulk_current_prices(tickers)
-info_map     = get_bulk_ticker_info(tickers)
+tickers = [h["ticker"] for h in holdings]
+prices = get_bulk_current_prices(tickers)
+info_map = get_bulk_ticker_info(tickers)
+names = get_company_names(tickers)
 
 # Build a flat DataFrame with market value and sector per holding
 
@@ -73,6 +74,7 @@ for h in holdings:
     sector = info_map.get(t, {}).get("sector", "Unknown")
     rows.append({
         "Ticker": t,
+        "Company": names.get(t, t),
         "Market Value": mkt_val,
         "Sector": sector,
         "Account": h.get("accounts", ""),
@@ -122,9 +124,9 @@ with col1:
     st.plotly_chart(fig_ticker, use_container_width=True)
 
 with col2:
-    display_cols = ["Ticker", "Market Value", "Weight %", "Sector"]
+    display_cols = ["Ticker", "Company", "Market Value", "Weight %", "Sector"]
     if show_account_col:
-        display_cols = ["Ticker", "Account", "Market Value", "Weight %", "Sector"]
+        display_cols = ["Ticker", "Company", "Account", "Market Value", "Weight %", "Sector"]
     display_df = df[display_cols].copy()
     display_df["Market Value"] = display_df["Market Value"].map("${:,.2f}".format)
     display_df["Weight %"] = display_df["Weight %"].map("{:.2f}%".format)
