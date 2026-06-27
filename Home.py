@@ -71,8 +71,29 @@ if not holdings:
     st.stop()
 
 tickers = [h["ticker"] for h in holdings]
-with st.spinner("Wait until portfolio is loaded before going to another page..."):
+
+with st.spinner("Loading portfolio, please wait before navigating away..."):
     prices = get_bulk_current_prices(tickers)
+
+    # Pre-fetch news and earnings inside the spinner so they're ready when page renders
+    news_items_raw = {}
+    for ticker in tickers:
+        news_items_raw[ticker] = get_news(ticker, limit=2)
+
+    earnings_soon = []
+    now = datetime.now()
+    week_end = now + timedelta(days=7)
+    for ticker in tickers:
+        try:
+            df = get_earnings_dates(ticker, limit=4)
+            if df.empty:
+                continue
+            for dt in df.index:
+                dt_naive = dt.tz_localize(None) if hasattr(dt, "tzinfo") and dt.tzinfo else dt
+                if now <= dt_naive <= week_end:
+                    earnings_soon.append((ticker, dt_naive.strftime("%Y-%m-%d")))
+        except Exception:
+            pass
 
 # ── Day change data ───────────────────────────────────────────────────────────
 
@@ -190,7 +211,7 @@ with news_col:
         st.subheader("Latest News")
         news_items = []
         for ticker in tickers:
-            articles = get_news(ticker, limit=2)
+            articles = news_items_raw.get(ticker, [])
             for a in articles:
                 news_items.append({
                     "ticker": ticker,
@@ -265,20 +286,7 @@ with st.container(border=True):
     else:
         st.caption("No significant holdings movement today.")
 
-    now = datetime.now()
-    week_end = now + timedelta(days=7)
-    earnings_soon = []
-    for ticker in tickers:
-        try:
-            df = get_earnings_dates(ticker, limit=4)
-            if df.empty:
-                continue
-            for dt in df.index:
-                dt_naive = dt.tz_localize(None) if hasattr(dt, "tzinfo") and dt.tzinfo else dt
-                if now <= dt_naive <= week_end:
-                    earnings_soon.append((ticker, dt_naive.strftime("%Y-%m-%d")))
-        except Exception:
-            pass
+    # earnings_soon already fetched during initial load spinner above
 
     if earnings_soon:
         st.markdown("**📅 Upcoming earnings (next 7 days):**")
