@@ -2,9 +2,9 @@ import streamlit as st
 from datetime import datetime, timedelta
 import yfinance as yf
 import pandas as pd
-from database import initialize_db, get_transactions, get_setting, get_known_accounts, upsert_portfolio_snapshot
+from database import initialize_db, get_transactions, get_setting, get_known_accounts, upsert_portfolio_snapshot, get_unread_count
 from data import get_bulk_current_prices, get_news, get_earnings_dates, get_company_names
-from utils.theme import apply_theme
+from utils.theme import apply_theme, show_notification_badge
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -12,7 +12,8 @@ st.set_page_config(page_title="Stock Dashboard", page_icon="📈", layout="wide"
 
 initialize_db()
 apply_theme()
-
+_badge_count = get_unread_count()
+show_notification_badge(count=_badge_count)
 
 # ── Weekly CSV reminder banner ────────────────────────────────────────────────
 
@@ -316,3 +317,10 @@ with st.container(border=True):
     ql9.page_link("pages/9_News.py",            label="News",           icon="📰")
     ql10.page_link("pages/10_Notifications.py", label="Notifications",  icon="🔔")
     ql11.page_link("pages/11_Settings.py",      label="Settings",       icon="⚙️")
+
+    # ── Refresh badge if new notification was created after page loaded ────────────
+import time
+time.sleep(2)
+_new_count = get_unread_count()
+if _new_count != _badge_count:
+    st.rerun()

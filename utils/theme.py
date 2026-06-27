@@ -52,3 +52,26 @@ def html_table(rows: list[dict], theme: str = "") -> str:
         f"<tbody>{rows_html}</tbody>"
         f"</table></div>"
     )
+
+def show_notification_badge(count: int = -1):
+    from database import get_unread_count
+    if count == -1:
+        count = get_unread_count()
+    if count > 0:
+        st.sidebar.markdown(
+            f"""
+            <div style="
+                background-color: #e63946;
+                color: white;
+                border-radius: 12px;
+                padding: 2px 10px;
+                font-size: 0.8rem;
+                font-weight: bold;
+                display: inline-block;
+                margin-top: 4px;
+            ">
+                🔔 {count} unread notification{'s' if count != 1 else ''}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )

@@ -18,8 +18,9 @@ from utils.csv_parser import parse_unrealized_gl_csv, apply_csv_import
 st.set_page_config(page_title="Portfolio", layout="wide")
 initialize_db()
 
-from utils.theme import apply_theme
+from utils.theme import apply_theme, show_notification_badge
 apply_theme()
+show_notification_badge()
 
 
 # Only reset on true page load, not on reruns (e.g. fetch button)

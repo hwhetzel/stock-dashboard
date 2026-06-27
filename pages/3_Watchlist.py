@@ -13,8 +13,9 @@ from utils.indicators import compute_rsi, compute_macd, compute_moving_averages
 st.set_page_config(page_title="Watchlist", layout="wide")
 initialize_db()
 
-from utils.theme import apply_theme
+from utils.theme import apply_theme, show_notification_badge
 apply_theme()
+show_notification_badge()
 
 st.title("Watchlist")
 

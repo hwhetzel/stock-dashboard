@@ -10,8 +10,9 @@ from data import get_dividends, get_dividend_calendar, get_bulk_current_prices
 st.set_page_config(page_title="Dividends", layout="wide")
 initialize_db()
 
-from utils.theme import apply_theme
+from utils.theme import apply_theme, show_notification_badge
 apply_theme()
+show_notification_badge()
 
 st.title("Dividends")
 

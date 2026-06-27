@@ -12,12 +12,15 @@ from database import (
     get_setting,
     get_known_accounts
 )
+from utils.theme import apply_theme, show_notification_badge
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Notifications", layout="wide")
 initialize_db()
 
+apply_theme()
+show_notification_badge()
 
 st.title("Notifications")
 

@@ -10,8 +10,9 @@ from database import initialize_db, get_setting, set_setting
 st.set_page_config(page_title="News", layout="wide")
 initialize_db()
 
-from utils.theme import apply_theme
+from utils.theme import apply_theme, show_notification_badge
 apply_theme()
+show_notification_badge()
 
 st.title("News")
 
