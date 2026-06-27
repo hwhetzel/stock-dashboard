@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 import yfinance as yf
 import pandas as pd
-from database import initialize_db, get_transactions, get_setting, get_known_accounts
+from database import initialize_db, get_transactions, get_setting, get_known_accounts, upsert_portfolio_snapshot
 from data import get_bulk_current_prices, get_news, get_earnings_dates
 from utils.theme import apply_theme
 
@@ -114,6 +114,18 @@ for h in holdings:
 total_unrealized = total_value - total_cost
 total_unrealized_pct = (total_unrealized / total_cost * 100) if total_cost else 0
 total_day_change_pct = (total_day_change / (total_value - total_day_change) * 100) if (total_value - total_day_change) else 0
+
+# ── Save daily portfolio snapshot ─────────────────────────────────────────────
+# Runs silently on every app open. If a snapshot already exists for today,
+# it gets replaced with the latest value. Accumulates over time so analytics
+# can use real observed values instead of reconstructed history.
+if total_value > 0:
+    upsert_portfolio_snapshot(
+        date=datetime.now().strftime("%Y-%m-%d"),
+        value=round(total_value, 2),
+        cost_basis=round(total_cost, 2),
+    )
+
 
 # ── Portfolio summary cards ───────────────────────────────────────────────────
 

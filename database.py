@@ -62,6 +62,16 @@ def initialize_db():
         )
     """)
 
+    # --- Portfolio Snapshots ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            date        TEXT    NOT NULL UNIQUE,
+            value       REAL    NOT NULL,
+            cost_basis  REAL    NOT NULL
+    )
+""")
+
     # --- Screener configs ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS screener_configs (
@@ -319,6 +329,38 @@ def set_setting(key: str, value):
     )
     conn.commit()
     conn.close()
+
+
+# ── Portfolio Snapshots ───────────────────────────────────────────────────────
+
+def upsert_portfolio_snapshot(date: str, value: float, cost_basis: float):
+    """Insert today's snapshot, or replace it if one already exists for this date."""
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO portfolio_snapshots (date, value, cost_basis)
+           VALUES (?, ?, ?)
+           ON CONFLICT(date) DO UPDATE SET value=excluded.value, cost_basis=excluded.cost_basis""",
+        (date, value, cost_basis)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_portfolio_snapshots() -> list[dict]:
+    """Return all snapshots ordered oldest to newest."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM portfolio_snapshots ORDER BY date ASC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_snapshot_count() -> int:
+    conn = get_connection()
+    count = conn.execute("SELECT COUNT(*) FROM portfolio_snapshots").fetchone()[0]
+    conn.close()
+    return count
 
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
