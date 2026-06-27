@@ -51,7 +51,8 @@ def wait_for_streamlit(timeout: int = 30):
 
 def background_price_monitor():
     """
-    Background thread that checks prices against notification thresholds.
+    Background thread that checks prices against notification thresholds
+    and refreshes the portfolio snapshot periodically.
     Runs independently of Streamlit — works even when app is minimized.
     Stops cleanly when _stop_monitor is set (app closes).
     """
@@ -67,17 +68,57 @@ def background_price_monitor():
         except Exception:
             pass
 
+        # ── Refresh portfolio snapshot with latest prices ──────────────────
+        try:
+            from datetime import datetime
+            import yfinance as yf
+            from database import get_transactions, upsert_portfolio_snapshot
+
+            transactions = get_transactions()
+            by_ticker: dict = {}
+            for tx in sorted(transactions, key=lambda x: x["date"]):
+                by_ticker.setdefault(tx["ticker"], []).append(tx)
+
+            total_value = 0.0
+            total_cost = 0.0
+            for ticker, txs in by_ticker.items():
+                shares = 0.0
+                cost = 0.0
+                for tx in txs:
+                    if tx["type"] == "buy":
+                        cost += tx["shares"] * tx["price"]
+                        shares += tx["shares"]
+                    elif tx["type"] == "sell" and shares > 0:
+                        avg = cost / shares
+                        sell = min(tx["shares"], shares)
+                        cost -= sell * avg
+                        shares -= sell
+                if shares > 0.0001:
+                    try:
+                        price = yf.Ticker(ticker).fast_info.last_price or 0
+                        total_value += shares * price
+                        total_cost += cost
+                    except Exception:
+                        pass
+
+            if total_value > 0:
+                upsert_portfolio_snapshot(
+                    date=datetime.now().strftime("%Y-%m-%d"),
+                    value=round(total_value, 2),
+                    cost_basis=round(total_cost, 2),
+                )
+        except Exception:
+            pass
+
         # Sleep in small increments so we can respond to stop signal quickly
         check_interval_mins = 5.0
         try:
-            # Read interval from DB each cycle so settings changes take effect
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             from database import get_setting
             check_interval_mins = float(str(get_setting("price_check_interval_mins", "5")))
         except Exception:
             pass
 
-        # Sleep in 5-second chunks so stop signal is picked up quickly
         elapsed = 0.0
         interval_secs = check_interval_mins * 60
         while elapsed < interval_secs and not _stop_monitor.is_set():
