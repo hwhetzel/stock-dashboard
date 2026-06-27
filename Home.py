@@ -71,7 +71,8 @@ if not holdings:
     st.stop()
 
 tickers = [h["ticker"] for h in holdings]
-prices = get_bulk_current_prices(tickers)
+with st.spinner("Wait until portfolio is loaded before going to another page..."):
+    prices = get_bulk_current_prices(tickers)
 
 # ── Day change data ───────────────────────────────────────────────────────────
 

@@ -84,6 +84,92 @@ def background_price_monitor():
             time.sleep(5)
             elapsed += 5
 
+def create_session_notification():
+    """
+    Build and save a session summary notification on app launch.
+    Runs once per launch — called after Streamlit is ready, before the window opens.
+    Only creates one per day to avoid duplicates if the app is restarted.
+    """
+    try:
+        from datetime import datetime
+        from database import get_transactions, get_watchlist, get_setting, add_notification, get_notifications
+        import yfinance as yf
+
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # Don't create more than one session notification per day
+        existing = get_notifications()
+        for n in existing:
+            s = n.get("summary", {})
+            if s.get("type") == "session" and s.get("date", "").startswith(today):
+                return
+
+        # Check holdings for significant moves
+        transactions = get_transactions()
+        by_ticker: dict = {}
+        for tx in sorted(transactions, key=lambda x: x["date"]):
+            by_ticker.setdefault(tx["ticker"], []).append(tx)
+
+        held = []
+        for ticker, txs in by_ticker.items():
+            shares = 0.0
+            for tx in txs:
+                if tx["type"] == "buy":
+                    shares += tx["shares"]
+                elif tx["type"] == "sell":
+                    shares -= tx["shares"]
+            if shares > 0.0001:
+                held.append(ticker)
+
+        threshold = float(str(get_setting("notify_price_change_pct", "2.0")))
+        holdings_moves = []
+        for ticker in held:
+            try:
+                fi = yf.Ticker(ticker).fast_info
+                current = fi.last_price
+                prev = fi.previous_close
+                if current and prev and prev > 0:
+                    change_pct = (current - prev) / prev * 100
+                    if abs(change_pct) >= threshold:
+                        holdings_moves.append({
+                            "ticker": ticker,
+                            "price": round(current, 2),
+                            "change_pct": round(change_pct, 2),
+                        })
+            except Exception:
+                pass
+
+        # Check watchlist for significant moves
+        watchlist = get_watchlist()
+        watch_threshold = float(str(get_setting("notify_watchlist_change_pct", "1.0")))
+        watchlist_moves = []
+        for w in watchlist:
+            ticker = w["ticker"]
+            try:
+                fi = yf.Ticker(ticker).fast_info
+                current = fi.last_price
+                prev = fi.previous_close
+                if current and prev and prev > 0:
+                    change_pct = (current - prev) / prev * 100
+                    if abs(change_pct) >= watch_threshold:
+                        watchlist_moves.append({
+                            "ticker": ticker,
+                            "price": round(current, 2),
+                            "change_pct": round(change_pct, 2),
+                        })
+            except Exception:
+                pass
+
+        summary = {
+            "type": "session",
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "holdings_moves": holdings_moves,
+            "watchlist_moves": watchlist_moves,
+        }
+        add_notification(summary)
+
+    except Exception:
+        pass
 
 def main():
     # Start Streamlit in background thread
@@ -95,6 +181,9 @@ def main():
     if not ready:
         print("Streamlit failed to start within 30 seconds.")
         sys.exit(1)
+
+    # Create session summary notification once on launch
+    create_session_notification()
 
     # Start background price monitor thread
     monitor_thread = threading.Thread(target=background_price_monitor, daemon=True)

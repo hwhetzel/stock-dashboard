@@ -1,6 +1,6 @@
 import streamlit as st
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from database import (
     initialize_db,
     get_notifications,
@@ -9,14 +9,9 @@ from database import (
     delete_notifications,
     delete_all_notifications,
     get_unread_count,
-    add_notification,
-    get_transactions,
-    get_watchlist,
     get_setting,
-    set_setting,
     get_known_accounts
 )
-from data import get_earnings_dates
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -26,145 +21,6 @@ initialize_db()
 
 st.title("Notifications")
 
-# ── Session summary generator ─────────────────────────────────────────────────
-
-def get_held_tickers(transactions):
-    by_ticker = {}
-    for tx in sorted(transactions, key=lambda x: x["date"]):
-        by_ticker.setdefault(tx["ticker"], []).append(tx)
-    held = []
-    for ticker, txs in by_ticker.items():
-        shares = 0.0
-        cost_basis = 0.0
-        accounts = set()
-        for tx in txs:
-            if tx.get("account"):
-                accounts.add(tx["account"])
-            if tx["type"] == "buy":
-                cost_basis += tx["shares"] * tx["price"]
-                shares += tx["shares"]
-            elif tx["type"] == "sell":
-                avg = cost_basis / shares if shares else 0
-                sell = min(tx["shares"], shares)
-                cost_basis -= sell * avg
-                shares -= sell
-        if shares > 0.0001:
-            held.append({
-                "ticker": ticker,
-                "shares": shares,
-                "cost_basis": cost_basis,
-                "accounts": ", ".join(sorted(accounts)) if accounts else "",
-            })
-    return held
-
-
-def generate_session_summary() -> dict:
-    """
-    Build a summary dict of what changed since the last session.
-    Checks: holdings movement, watchlist price changes,
-    upcoming earnings (next 7 days), upcoming dividends.
-    """
-
-    price_threshold = float(str(get_setting("notify_price_change_pct", "2.0")))
-    watch_threshold = float(str(get_setting("notify_watchlist_change_pct", "1.0")))
-    earnings_days = int(str(get_setting("notify_earnings_lead_days", "7")))
-    notify_holdings_on = get_setting("notify_holdings", "1") == "1"
-    notify_watchlist_on = get_setting("notify_watchlist", "1") == "1"
-    notify_earnings_on = get_setting("notify_earnings", "1") == "1"
-
-    transactions = get_transactions()
-    holdings = get_held_tickers(transactions)
-    watchlist = get_watchlist()
-
-    tickers_held = [h["ticker"] for h in holdings]
-    tickers_watch = [w["ticker"] for w in watchlist]
-    all_tickers = list(dict.fromkeys(tickers_held + tickers_watch))
-
-
-    # ── Holdings movement (>2% change today) ─────────────────────────────────
-    import yfinance as yf
-    holdings_movement = []
-    if notify_holdings_on:
-        for h in holdings:
-            ticker = h["ticker"]
-            try:
-                fi = yf.Ticker(ticker).fast_info
-                current = fi.last_price
-                prev = fi.previous_close
-                if current and prev and prev > 0:
-                    change_pct = (current - prev) / prev * 100
-                    if abs(change_pct) >= price_threshold:
-                        holdings_movement.append({
-                            "ticker": ticker,
-                            "change_pct": round(change_pct, 2),
-                            "price": round(current, 2),
-                            "accounts": h.get("accounts", ""),
-                        })
-            except Exception:
-                pass
-
-    # ── Watchlist price changes (>1% change today) ────────────────────────────
-    watchlist_changes = []
-    if notify_watchlist_on:
-        for w in watchlist:
-            ticker = w["ticker"]
-            try:
-                fi = yf.Ticker(ticker).fast_info
-                current = fi.last_price
-                prev = fi.previous_close
-                if current and prev and prev > 0:
-                    change_pct = (current - prev) / prev * 100
-                    if abs(change_pct) >= watch_threshold:
-                        watchlist_changes.append({
-                            "ticker": ticker,
-                            "change_pct": round(change_pct, 2),
-                            "price": round(current, 2),
-                            "target": w.get("target_price"),
-                        })
-            except Exception:
-                pass
-
-    # ── Upcoming earnings (next 7 days) ───────────────────────────────────────
-    upcoming_earnings = []
-    now = datetime.now()
-    week_end = now + timedelta(days=earnings_days)
-    for ticker in all_tickers:
-        try:
-            df = get_earnings_dates(ticker, limit=4)
-            if df.empty:
-                continue
-            df.index = df.index if hasattr(df.index, "tz") else df.index
-            for dt in df.index:
-                dt_naive = dt.tz_localize(None) if dt.tzinfo else dt
-                if notify_earnings_on and now <= dt_naive <= week_end:
-                    upcoming_earnings.append({
-                        "ticker": ticker,
-                        "date": dt_naive.strftime("%Y-%m-%d"),
-                    })
-        except Exception:
-            pass
-
-    return {
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "holdings_movement": holdings_movement,
-        "watchlist_changes": watchlist_changes,
-        "upcoming_earnings": upcoming_earnings,
-    }
-
-
-# ── Auto-generate summary on first visit this session ────────────────────────
-
-if "notification_generated" not in st.session_state:
-    st.session_state["notification_generated"] = True
-    with st.spinner("Generating session summary..."):
-        summary = generate_session_summary()
-        has_content = (
-            summary["holdings_movement"]
-            or summary["watchlist_changes"]
-            or summary["upcoming_earnings"]
-        )
-        if has_content:
-            add_notification(summary)
 
 # ── Mark all read when page is opened ────────────────────────────────────────
 
@@ -234,15 +90,32 @@ if notifications:
 
 # ── Notification list ─────────────────────────────────────────────────────────
 
+PAGE_SIZE = 10
+
 if not notifications:
     st.info("No notifications yet. They will appear here when you open the app and there are changes to report.")
 else:
-    for notif in notifications:
+    # ── Pagination state ──────────────────────────────────────────────────────
+    total_pages = max(1, (len(notifications) + PAGE_SIZE - 1) // PAGE_SIZE)
+
+    if "notif_page" not in st.session_state:
+        st.session_state["notif_page"] = 1
+
+    # Clamp page if notifications were deleted
+    if st.session_state["notif_page"] > total_pages:
+        st.session_state["notif_page"] = total_pages
+
+    current_page = st.session_state["notif_page"]
+    start = (current_page - 1) * PAGE_SIZE
+    end = start + PAGE_SIZE
+    page_notifications = notifications[start:end]
+
+    # ── Render current page ───────────────────────────────────────────────────
+    for notif in page_notifications:
         n_id = notif["id"]
         summary = notif["summary"]
         created = notif["created_at"]
 
-        # Title differs based on notification type
         notif_type = summary.get("type", "session")
         if notif_type == "csv_import":
             expander_title = f"📥 CSV Import — {created}"
@@ -309,13 +182,12 @@ else:
                 if not any([added, removed, changed, moved]):
                     st.info("No changes detected since last import.")
 
-        # ── Price alert summary ───────────────────────────────────────────
+            # ── Price alert summary ───────────────────────────────────────────
             elif notif_type == "price_alert":
                 alerts = summary.get("alerts", [])
                 if not alerts:
                     st.info("No alert details available.")
                 else:
-                    # Group by threshold type
                     holdings_alerts = [a for a in alerts if a["threshold_type"] == "Holdings Movement"]
                     watchlist_alerts = [a for a in alerts if a["threshold_type"] == "Watchlist Change"]
                     earnings_alerts = [a for a in alerts if a["threshold_type"] == "Upcoming Earnings"]
@@ -355,13 +227,14 @@ else:
 
             # ── Session summary ───────────────────────────────────────────────
             else:
-                movements = summary.get("holdings_movement", [])
+                # Support both old key names (holdings_movement) and new (holdings_moves)
+                movements = summary.get("holdings_movement", summary.get("holdings_moves", []))
                 show_account_col = (
                     get_setting("has_multiple_accounts", "false") == "true"
                     or len(get_known_accounts()) > 1
                 )
                 if movements:
-                    st.markdown("**📈 Holdings Movement (≥2% today)**")
+                    st.markdown("**📈 Holdings Movement**")
                     for m in movements:
                         sign = "+" if m["change_pct"] >= 0 else ""
                         color = "green" if m["change_pct"] >= 0 else "red"
@@ -373,9 +246,10 @@ else:
                             unsafe_allow_html=True,
                         )
 
-                changes = summary.get("watchlist_changes", [])
+                # Support both old key name (watchlist_changes) and new (watchlist_moves)
+                changes = summary.get("watchlist_changes", summary.get("watchlist_moves", []))
                 if changes:
-                    st.markdown("**👀 Watchlist Changes (≥1% today)**")
+                    st.markdown("**👀 Watchlist Changes**")
                     for c in changes:
                         sign = "+" if c["change_pct"] >= 0 else ""
                         color = "green" if c["change_pct"] >= 0 else "red"
@@ -388,9 +262,12 @@ else:
 
                 earnings = summary.get("upcoming_earnings", [])
                 if earnings:
-                    st.markdown("**📅 Upcoming Earnings (next 7 days)**")
+                    st.markdown("**📅 Upcoming Earnings**")
                     for e in earnings:
                         st.markdown(f"- {e['ticker']} — {e['date']}")
+
+                if not movements and not changes and not earnings:
+                    st.caption("No significant changes at time of launch.")
 
             # ── Delete individual ─────────────────────────────────────────────
             if st.button("🗑 Delete", key=f"del_{n_id}"):
@@ -407,4 +284,17 @@ else:
                     st.rerun()
                 if d2.button("No", key=f"no_{n_id}"):
                     st.session_state.pop("confirm_delete_id", None)
+                    st.rerun()
+
+    # ── Page number buttons ───────────────────────────────────────────────────
+    if total_pages > 1:
+        st.divider()
+        st.caption(f"Page {current_page} of {total_pages} — {len(notifications)} total notifications")
+        cols = st.columns(min(total_pages, 10))
+        for i, col in enumerate(cols):
+            page_num = i + 1
+            if page_num <= total_pages:
+                label = f"**{page_num}**" if page_num == current_page else str(page_num)
+                if col.button(label, key=f"page_btn_{page_num}"):
+                    st.session_state["notif_page"] = page_num
                     st.rerun()
