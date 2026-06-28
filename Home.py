@@ -73,7 +73,25 @@ if not holdings:
 
 tickers = [h["ticker"] for h in holdings]
 
-with st.spinner("Loading portfolio, please wait before navigating away..."):
+_loading_banner = st.empty()
+_loading_banner.markdown(
+    """
+    <div style="
+        background-color: #c0392b;
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: bold;
+        text-align: center;
+        letter-spacing: 0.3px;
+    ">
+        ⚠️ Loading portfolio — please wait before navigating away...
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+with st.spinner(""):
     prices = get_bulk_current_prices(tickers)
     company_names = get_company_names(tickers)  # add this line
 
@@ -96,6 +114,8 @@ with st.spinner("Loading portfolio, please wait before navigating away..."):
                     earnings_soon.append((ticker, dt_naive.strftime("%Y-%m-%d")))
         except Exception:
             pass
+
+_loading_banner.empty()
 
 # ── Day change data ───────────────────────────────────────────────────────────
 
