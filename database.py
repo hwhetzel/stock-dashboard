@@ -81,6 +81,17 @@ def initialize_db():
         )
     """)
 
+    # --- Archived Positions ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS archived_positions (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker          TEXT    NOT NULL UNIQUE,
+            archived_date   TEXT    NOT NULL,
+            realized_gl     REAL    NOT NULL,
+            notes           TEXT
+        )
+    """)
+
     conn.commit()
 
     # ── Migrations: add columns to existing DBs that predate this schema ──────
@@ -361,6 +372,53 @@ def get_snapshot_count() -> int:
     count = conn.execute("SELECT COUNT(*) FROM portfolio_snapshots").fetchone()[0]
     conn.close()
     return count
+
+
+# ── Archived Positions ────────────────────────────────────────────────────────
+
+def archive_position(ticker: str, realized_gl: float, notes: str = ""):
+    """Move a fully-sold ticker to the archive."""
+    from datetime import date as dt
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO archived_positions (ticker, archived_date, realized_gl, notes)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(ticker) DO UPDATE SET
+               archived_date=excluded.archived_date,
+               realized_gl=excluded.realized_gl,
+               notes=excluded.notes""",
+        (ticker.upper(), dt.today().strftime("%Y-%m-%d"), realized_gl, notes)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_archived_positions() -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM archived_positions ORDER BY archived_date DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def unarchive_position(ticker: str):
+    """Remove ticker from archive — called when a new buy transaction is added."""
+    conn = get_connection()
+    conn.execute(
+        "DELETE FROM archived_positions WHERE ticker = ?", (ticker.upper(),)
+    )
+    conn.commit()
+    conn.close()
+
+
+def is_archived(ticker: str) -> bool:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT id FROM archived_positions WHERE ticker = ?", (ticker.upper(),)
+    ).fetchone()
+    conn.close()
+    return row is not None
 
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────

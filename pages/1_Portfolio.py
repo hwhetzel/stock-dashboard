@@ -9,6 +9,9 @@ from database import (
     update_transaction,
     get_known_accounts,
     get_setting,
+    archive_position,
+    get_archived_positions,
+    unarchive_position,
 )
 from data import get_bulk_current_prices, get_company_names
 from utils.csv_parser import parse_unrealized_gl_csv, apply_csv_import
@@ -36,16 +39,19 @@ st.title("Portfolio")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def compute_holdings(transactions: list[dict]) -> pd.DataFrame:
+def compute_holdings(transactions: list[dict]) -> tuple[pd.DataFrame, dict]:
     """
     Derive current holdings from the full transaction list.
-    Also tracks which accounts hold each ticker (for the dynamic Account column).
+    Returns (holdings_df, closed_positions) where closed_positions is
+    {ticker: realized_gl} for tickers with 0 shares remaining.
     """
     by_ticker: dict[str, list[dict]] = {}
     for tx in sorted(transactions, key=lambda x: x["date"]):
         by_ticker.setdefault(tx["ticker"], []).append(tx)
 
     rows = []
+    closed: dict[str, float] = {}
+
     for ticker, txs in by_ticker.items():
         shares_held = 0.0
         cost_basis = 0.0
@@ -72,13 +78,16 @@ def compute_holdings(transactions: list[dict]) -> pd.DataFrame:
                 "Avg Cost": round(cost_basis / shares_held, 4),
                 "Cost Basis": round(cost_basis, 2),
                 "Realized G/L": round(realized_gl, 2),
-                # Store accounts as comma-separated string for display
                 "_accounts": ", ".join(sorted(accounts)) if accounts else "",
             })
+        elif realized_gl != 0:
+            # All shares sold — track for archive button
+            closed[ticker] = round(realized_gl, 2)
 
-    return pd.DataFrame(rows) if rows else pd.DataFrame(
+    df = pd.DataFrame(rows) if rows else pd.DataFrame(
         columns=["Ticker", "Shares", "Avg Cost", "Cost Basis", "Realized G/L", "_accounts"]
     )
+    return df, closed
 
 
 def enrich_with_market_data(holdings: pd.DataFrame) -> pd.DataFrame:
@@ -239,8 +248,14 @@ st.divider()
 st.subheader("Current Holdings")
 
 all_transactions = get_transactions()
-holdings = compute_holdings(all_transactions)
+holdings, closed_positions = compute_holdings(all_transactions)
 holdings = enrich_with_market_data(holdings)
+
+# Remove already-archived tickers from closed_positions so they
+# don't show in both Closed Positions and Archived Positions
+archived = get_archived_positions()
+archived_tickers = {a["ticker"] for a in archived}
+closed_positions = {t: gl for t, gl in closed_positions.items() if t not in archived_tickers}
 
 if holdings.empty:
     st.info("No holdings yet. Add your first transaction below or import a CSV.")
@@ -262,6 +277,84 @@ else:
 
     st.divider()
     show_holdings_table(holdings, show_account_col)
+
+# ── Closed positions (all shares sold, not yet archived) ─────────────────────
+
+if closed_positions:
+    st.divider()
+    st.subheader("Closed Positions")
+    st.caption("These tickers have no remaining shares. Archive them to move them out of your transaction history view.")
+
+    for ticker, realized_gl in closed_positions.items():
+        col_t, col_g, col_b = st.columns([2, 2, 1])
+        col_t.markdown(f"**{ticker}**")
+        color = "green" if realized_gl >= 0 else "red"
+        col_g.markdown(
+            f"<span style='color:{color}'>Realized G/L: ${realized_gl:,.2f}</span>",
+            unsafe_allow_html=True,
+        )
+        if col_b.button("Archive", key=f"archive_{ticker}"):
+            st.session_state[f"confirm_archive_{ticker}"] = True
+
+        if st.session_state.get(f"confirm_archive_{ticker}"):
+            st.warning(f"Archive {ticker}? This moves it to the Archived Positions section below.")
+            c1, c2 = st.columns([1, 5])
+            if c1.button("Yes", key=f"yes_archive_{ticker}"):
+                archive_position(ticker, realized_gl)
+                st.session_state.pop(f"confirm_archive_{ticker}", None)
+                st.rerun()
+            if c2.button("No", key=f"no_archive_{ticker}"):
+                st.session_state.pop(f"confirm_archive_{ticker}", None)
+                st.rerun()
+
+# ── Archived positions ────────────────────────────────────────────────────────
+
+# archived already fetched above
+if archived:
+    st.divider()
+    st.subheader("Archived Positions")
+    st.caption("Fully closed positions. Buying a ticker again automatically removes it from this list.")
+
+    archived_df = pd.DataFrame(archived)
+    archived_df = archived_df.rename(columns={
+        "ticker": "Ticker",
+        "archived_date": "Archived Date",
+        "realized_gl": "Realized G/L",
+        "notes": "Notes",
+    })
+
+    def color_gl(val):
+        try:
+            color = "green" if float(val) >= 0 else "red"
+            return f"color: {color}"
+        except (TypeError, ValueError):
+            return ""
+
+    styled_archived = archived_df[["Ticker", "Archived Date", "Realized G/L", "Notes"]].style.map(
+        color_gl, subset=["Realized G/L"]
+    ).format({"Realized G/L": "${:,.2f}"})
+
+    st.dataframe(styled_archived, use_container_width=True, hide_index=True)
+
+    # Transaction history for archived tickers
+    with st.expander("View transaction history for archived positions"):
+        archived_tickers = [a["ticker"] for a in archived]
+        selected_archived = st.selectbox(
+            "Select archived ticker",
+            options=archived_tickers,
+            key="archived_ticker_select",
+        )
+        archived_txs = get_transactions(ticker=selected_archived)
+        if archived_txs:
+            atx_df = pd.DataFrame(archived_txs)
+            cols = ["id", "date", "type", "shares", "price", "account", "notes"]
+            cols = [c for c in cols if c in atx_df.columns]
+            atx_df = atx_df[cols]
+            atx_df.columns = [c.title() for c in cols]
+            if "Price" in atx_df.columns:
+                atx_df["Price"] = atx_df["Price"].map("${:.2f}".format)
+            st.dataframe(atx_df, use_container_width=True, hide_index=True)
+
 
 # ── Per-holding transaction detail ────────────────────────────────────────────
 
@@ -372,6 +465,10 @@ with st.form("add_tx_form", clear_on_submit=True):
                 account=account_val,
                 source="manual",
             )
+            # If this ticker was archived (all shares previously sold),
+            # buying again un-archives it automatically
+            if tx_type == "buy":
+                unarchive_position(ticker_input)
             st.success(f"Added {tx_type} of {shares_input} shares of {ticker_input}.")
             st.session_state.pop("add_tx_fetch_msg", None)
             st.session_state.pop("add_tx_price", None)
