@@ -12,6 +12,7 @@ from database import (
     archive_position,
     get_archived_positions,
     unarchive_position,
+    delete_transactions_for_ticker
 )
 from data import get_bulk_current_prices, get_company_names
 from utils.csv_parser import parse_unrealized_gl_csv, apply_csv_import
@@ -377,6 +378,105 @@ if not holdings.empty:
         if "Price" in tx_df.columns:
             tx_df["Price"] = tx_df["Price"].map("${:.2f}".format)
         st.dataframe(tx_df, use_container_width=True, hide_index=True)
+
+    # ── Quick actions ─────────────────────────────────────────────────────────
+    if not selected_ticker:
+        st.stop()
+    st.caption("Quick actions for selected ticker:")
+    qa_col1, qa_col2 = st.columns([1, 1])
+
+    # ── Sell All ─────────────────────────────────────────────────────────────
+    if qa_col1.button("Sell All", key="sell_all_btn"):
+        st.session_state["confirm_sell_all"] = selected_ticker
+
+    if st.session_state.get("confirm_sell_all") == selected_ticker:
+        # Get current shares and price for the selected ticker
+        sel_row = holdings[holdings["Ticker"] == selected_ticker].iloc[0]
+        sel_shares = round(float(sel_row["Shares"]), 6)
+        sel_price = float(sel_row["Current Price"]) if sel_row["Current Price"] else 0.0
+        st.warning(
+            f"Sell all {sel_shares} shares of {selected_ticker} "
+            f"at current price ${sel_price:.2f}?"
+        )
+        sa1, sa2 = st.columns([1, 5])
+        if sa1.button("Yes", key="yes_sell_all"):
+            add_transaction(
+                ticker=selected_ticker,
+                type_="sell",
+                shares=sel_shares,
+                price=sel_price,
+                date=date.today().strftime("%Y-%m-%d"),
+                notes="Sell all — quick action",
+                source="manual",
+            )
+            st.session_state.pop("confirm_sell_all", None)
+            st.session_state["portfolio_loaded"] = False
+            st.success(f"Sold all {sel_shares} shares of {selected_ticker}.")
+            st.rerun()
+        if sa2.button("No", key="no_sell_all"):
+            st.session_state.pop("confirm_sell_all", None)
+            st.rerun()
+
+    # ── Delete All ────────────────────────────────────────────────────────────
+    if qa_col2.button("Delete All Transactions", key="delete_all_btn"):
+        st.session_state["confirm_delete_all"] = selected_ticker
+
+    if st.session_state.get("confirm_delete_all") == selected_ticker:
+        st.warning(
+            f"Delete ALL transactions for {selected_ticker}? "
+            f"This cannot be undone."
+        )
+        da1, da2 = st.columns([1, 5])
+        if da1.button("Yes", key="yes_delete_all"):
+            # Calculate realized G/L before deleting
+            del_realized = 0.0
+            if selected_ticker in closed_positions:
+                del_realized = closed_positions[selected_ticker]
+            else:
+                # Compute from current holdings realized G/L column
+                sel_rows = holdings[holdings["Ticker"] == selected_ticker]
+                if not sel_rows.empty:
+                    del_realized = float(sel_rows.iloc[0].get("Realized G/L", 0.0))
+
+            delete_transactions_for_ticker(selected_ticker)
+            st.session_state.pop("confirm_delete_all", None)
+            st.session_state["portfolio_loaded"] = False
+
+            # Offer to archive if there was any realized G/L
+            if del_realized != 0:
+                st.session_state[f"offer_archive_{selected_ticker}"] = del_realized
+            else:
+                st.success(f"All transactions for {selected_ticker} deleted.")
+            st.rerun()
+
+        if da2.button("No", key="no_delete_all"):
+            st.session_state.pop("confirm_delete_all", None)
+            st.rerun()
+
+    # ── Offer archive after delete all ───────────────────────────────────────
+    for _t in list(st.session_state.keys()):
+        if not isinstance(_t, str):
+            continue
+        if _t.startswith("offer_archive_"):
+            _ticker = _t.replace("offer_archive_", "")
+            _gl = st.session_state[_t]
+            color = "green" if _gl >= 0 else "red"
+            st.info(
+                f"All transactions for **{_ticker}** deleted. "
+                f"Realized G/L was "
+                f"<span style='color:{color}'>${_gl:,.2f}</span>. "
+                f"Would you like to archive this position?",
+                icon="📦",
+            )
+            oa1, oa2 = st.columns([1, 5])
+            if oa1.button("Archive", key=f"oa_yes_{_ticker}"):
+                archive_position(_ticker, _gl)
+                st.session_state.pop(_t, None)
+                st.success(f"{_ticker} archived.")
+                st.rerun()
+            if oa2.button("Skip", key=f"oa_no_{_ticker}"):
+                st.session_state.pop(_t, None)
+                st.rerun()
 
 # ── Add Transaction ───────────────────────────────────────────────────────────
 

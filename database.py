@@ -420,6 +420,13 @@ def is_archived(ticker: str) -> bool:
     conn.close()
     return row is not None
 
+def delete_transactions_for_ticker(ticker: str):
+    """Delete all transactions for a given ticker."""
+    conn = get_connection()
+    conn.execute("DELETE FROM transactions WHERE ticker = ?", (ticker.upper(),))
+    conn.commit()
+    conn.close()
+
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
