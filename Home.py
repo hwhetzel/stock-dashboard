@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 import yfinance as yf
 import pandas as pd
-from database import initialize_db, get_transactions, get_setting, get_known_accounts, upsert_portfolio_snapshot, get_unread_count
+from database import initialize_db, get_transactions, get_setting, get_known_accounts, upsert_portfolio_snapshot, get_unread_count, get_all_holding_notes
 from data import get_bulk_current_prices, get_news, get_earnings_dates, get_company_names
 from utils.theme import apply_theme, show_notification_badge
 
@@ -93,7 +93,8 @@ _loading_banner.markdown(
 )
 with st.spinner(""):
     prices = get_bulk_current_prices(tickers)
-    company_names = get_company_names(tickers)  # add this line
+    company_names = get_company_names(tickers)
+    holding_notes = get_all_holding_notes()
 
     # Pre-fetch news and earnings inside the spinner so they're ready when page renders
     news_items_raw = {}
@@ -227,6 +228,10 @@ with snap_col:
         row["Value"] = f"${mkt_val:,.2f}" if mkt_val else "N/A"
         row["Day %"] = f"{d['change_pct']:+.2f}%" if d.get("change_pct") is not None else "N/A"
         row["Total G/L %"] = f"{unreal_pct:+.2f}%" if unreal_pct is not None else "N/A"
+        if holding_notes.get(ticker):
+            row["Note"] = "📝"
+        else:
+            row["Note"] = ""
         snap_rows.append(row)
     st.dataframe(snap_rows, use_container_width=True, hide_index=True)
 

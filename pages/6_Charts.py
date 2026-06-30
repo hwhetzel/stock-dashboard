@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from database import initialize_db, get_transactions, get_watchlist
+from database import initialize_db, get_transactions, get_watchlist, get_holding_note
 from data import get_price_history
 from utils.indicators import compute_moving_averages, compute_rsi, compute_macd
 
@@ -85,7 +85,16 @@ ind_col1, ind_col2 = st.columns(2)
 show_rsi = ind_col1.checkbox("RSI (14)", value=True)
 show_macd = ind_col2.checkbox("MACD",     value=True)
 
+# ── Position note ─────────────────────────────────────────────────────────────
+
+note = get_holding_note(selected_ticker or "")
+if note:
+    st.divider()
+    st.markdown("**📝 Position Notes**")
+    st.info(note)
+
 st.divider()
+
 
 # ── Fetch data ────────────────────────────────────────────────────────────────
 
@@ -241,3 +250,4 @@ fig.update_layout(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+

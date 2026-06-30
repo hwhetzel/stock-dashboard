@@ -92,6 +92,15 @@ def initialize_db():
         )
     """)
 
+    # --- Holding Notes ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS holding_notes (
+            ticker      TEXT    PRIMARY KEY,
+            note        TEXT    NOT NULL DEFAULT '',
+            updated_at  TEXT    NOT NULL
+        )
+    """)
+
     conn.commit()
 
     # ── Migrations: add columns to existing DBs that predate this schema ──────
@@ -427,6 +436,40 @@ def delete_transactions_for_ticker(ticker: str):
     conn.commit()
     conn.close()
 
+# ── Holding Notes ─────────────────────────────────────────────────────────────
+
+def get_holding_note(ticker: str) -> str:
+    """Return the note for a ticker, or empty string if none."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT note FROM holding_notes WHERE ticker = ?", (ticker.upper(),)
+    ).fetchone()
+    conn.close()
+    return row["note"] if row else ""
+
+
+def set_holding_note(ticker: str, note: str):
+    """Save or update the note for a ticker."""
+    from datetime import datetime
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO holding_notes (ticker, note, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(ticker) DO UPDATE SET
+               note=excluded.note,
+               updated_at=excluded.updated_at""",
+        (ticker.upper(), note, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_all_holding_notes() -> dict[str, str]:
+    """Return {ticker: note} for all tickers that have notes."""
+    conn = get_connection()
+    rows = conn.execute("SELECT ticker, note FROM holding_notes").fetchall()
+    conn.close()
+    return {r["ticker"]: r["note"] for r in rows}
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 

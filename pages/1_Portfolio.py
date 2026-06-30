@@ -6,13 +6,15 @@ from database import (
     add_transaction,
     get_transactions,
     delete_transaction,
+    delete_transactions_for_ticker,
     update_transaction,
     get_known_accounts,
     get_setting,
     archive_position,
     get_archived_positions,
     unarchive_position,
-    delete_transactions_for_ticker
+    get_holding_note,
+    set_holding_note,
 )
 from data import get_bulk_current_prices, get_company_names
 from utils.csv_parser import parse_unrealized_gl_csv, apply_csv_import
@@ -378,6 +380,25 @@ if not holdings.empty:
         if "Price" in tx_df.columns:
             tx_df["Price"] = tx_df["Price"].map("${:.2f}".format)
         st.dataframe(tx_df, use_container_width=True, hide_index=True)
+
+    # ── Holding note ──────────────────────────────────────────────────────────
+    st.markdown("**📝 Position Notes**")
+    existing_note = get_holding_note(selected_ticker or "")
+    note_key = f"note_input_{selected_ticker}"
+    if note_key not in st.session_state:
+        st.session_state[note_key] = existing_note
+
+    new_note = str(st.text_area(
+        "Notes for this position (thesis, strategy, reminders)",
+        value=st.session_state[note_key],
+        height=100,
+        key=note_key,
+        placeholder="e.g. Long-term hold, buying dips below $150. Watch for earnings in Q3.",
+    ) or "")
+    if st.button("Save Note", key=f"save_note_{selected_ticker}"):
+        if selected_ticker:
+            set_holding_note(selected_ticker, new_note)
+            st.success("Note saved.")
 
     # ── Quick actions ─────────────────────────────────────────────────────────
     if not selected_ticker:
